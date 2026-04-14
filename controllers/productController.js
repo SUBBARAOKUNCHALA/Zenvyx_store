@@ -1,6 +1,7 @@
 const Product = require("../models/Product");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
+const { uploadMultipleImages } = require("../utils/cloudinaryUpload");
 
 const uploadFromBuffer = (fileBuffer) => {
     return new Promise((resolve, reject) => {
@@ -21,87 +22,39 @@ const uploadFromBuffer = (fileBuffer) => {
 // @desc Add product
 // @route POST /api/products
 exports.addProduct = async (req, res) => {
-    try {
-        const { name, description, price, category, stock, sizes } = req.body;
+try {
+    const { name, description, price, category, stock, discount, sizes } = req.body;
 
-        if (!name || !description || !price || !category) {
-            return res.status(400).json({
-                success: false,
-                message: "Name, description, price and category are required",
-            });
-        }
+    const files = req.files; // from multer
 
-        if (!sizes) {
-            return res.status(400).json({
-                success: false,
-                message: "Sizes are required",
-            });
-        }
+    const images = await uploadMultipleImages(files);
 
-        if (!req.file) {
-            return res.status(400).json({
-                success: false,
-                message: "Product image is required",
-            });
-        }
+    const parsedSizes = sizes ? JSON.parse(sizes) : [];
 
-        let parsedSizes = [];
+    const product = await Product.create({
+      name,
+      description,
+      price,
+      category,
+      stock,
+      discount,
+      sizes: parsedSizes,
+      image: images[0], // fallback
+      images,
+      createdBy: req.userId,
+    });
 
-        if (Array.isArray(sizes)) {
-            parsedSizes = sizes;
-        } else if (typeof sizes === "string") {
-            parsedSizes = sizes.split(",").map((size) => size.trim());
-        }
-
-        if (parsedSizes.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "At least one size is required",
-            });
-        }
-
-        const allowedCategories = ["Shirt", "T-Shirt", "Pant"];
-        if (!allowedCategories.includes(category)) {
-            return res.status(400).json({
-                success: false,
-                message: "Category must be Shirt, T-Shirt, or Pant",
-            });
-        }
-
-        const allowedSizes = ["S", "M", "L", "XL", "XXL", "28", "30", "32", "34", "36", "38"];
-        const invalidSizes = parsedSizes.filter((size) => !allowedSizes.includes(size));
-
-        if (invalidSizes.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: `Invalid sizes: ${invalidSizes.join(", ")}`,
-            });
-        }
-
-        const uploadResult = await uploadFromBuffer(req.file.buffer);
-
-        const product = await Product.create({
-            name: name.trim(),
-            description: description.trim(),
-            price: Number(price),
-            category: category.trim(),
-            stock: stock ? Number(stock) : 0,
-            sizes: parsedSizes,
-            image: uploadResult.secure_url,
-            cloudinaryId: uploadResult.public_id,
-        });
-
-        res.status(201).json({
-            success: true,
-            message: "Product added successfully",
-            data: product,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
+    res.status(201).json({
+      success: true,
+      data: product,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 };
 
 // @desc Get all products
@@ -121,4 +74,112 @@ exports.getAllProducts = async (req, res) => {
             message: error.message,
         });
     }
+};
+exports.updateProduct = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { name, description, price, category, stock, discount, sizes } = req.body;
+
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    let images = product.images;
+
+    if (req.files && req.files.length > 0) {
+      images = await uploadMultipleImages(req.files);
+    }
+
+    const parsedSizes = sizes ? JSON.parse(sizes) : product.sizes;
+
+    product.name = name || product.name;
+    product.description = description || product.description;
+    product.price = price || product.price;
+    product.category = category || product.category;
+    product.stock = stock || product.stock;
+    product.discount = discount || product.discount;
+    product.sizes = parsedSizes;
+    product.images = images;
+    product.image = images[0];
+
+    await product.save();
+
+    res.json({
+      success: true,
+      data: product,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+exports.getProductById = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: product,
+    });
+
+  } catch (error) {
+    console.error("getProductById error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch product",
+    });
+  }
+};
+
+exports.getSimilarProducts = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    // Step 1: find current product
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    // Step 2: find similar products
+    const similarProducts = await Product.find({
+      _id: { $ne: product._id }, // exclude current product
+      category: product.category, // same category
+    })
+      .sort({ createdAt: -1 }) // latest first
+      .limit(8); // limit results
+
+    res.status(200).json({
+      success: true,
+      count: similarProducts.length,
+      data: similarProducts,
+    });
+
+  } catch (error) {
+    console.error("getSimilarProducts error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch similar products",
+    });
+  }
 };

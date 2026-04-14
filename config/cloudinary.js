@@ -5,7 +5,7 @@ cloudinary.config({
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-console.log("cloud name:", process.env.CLOUDINARY_CLOUD_NAME);
-console.log("api key:", process.env.CLOUDINARY_API_KEY);
-console.log("api secret exists:", !!process.env.CLOUDINARY_API_SECRET);
-module.exports = cloudinary;
+// console.log("cloud name:", process.env.CLOUDINARY_CLOUD_NAME);
+// console.log("api key:", process.env.CLOUDINARY_API_KEY);
+// console.log("api secret exists:", !!process.env.CLOUDINARY_API_SECRET);
+module.exports = cloudinary; 

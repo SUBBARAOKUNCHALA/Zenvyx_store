@@ -97,6 +97,7 @@ exports.googleAuth = async (req, res) => {
                     _id: user._id,
                     name: user.name,
                     email: user.email,
+                    ProfilePic:user.profilePic,
                     token: generateToken(user._id),
                 },
             });
@@ -125,6 +126,7 @@ exports.googleAuth = async (req, res) => {
                 _id: user._id,
                 name: user.name,
                 email: user.email,
+                profilePic: user.picture,
                 token: generateToken(user._id),
             },
         });
@@ -178,8 +180,10 @@ exports.login = async (req, res) => {
 exports.sendOtp = async (req, res) => {
     try {
         const { email } = req.body;
+        console.log("otp reqbody",email)
 
         const user = await User.findOne({ email });
+        console.log("user find for otp",user)
 
         if (!user) {
             return res.status(404).json({ message: "User not found" });
@@ -216,6 +220,7 @@ exports.sendOtp = async (req, res) => {
         });
 
     } catch (error) {
+        console.log("err for otp",error)
         res.status(500).json({ message: error.message });
     }
 };

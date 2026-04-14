@@ -17,7 +17,7 @@
     }
 
     .container {
-      max-width: 600px;
+      max-width: 700px;
       margin: auto;
       background: #fff;
       padding: 28px;
@@ -98,22 +98,33 @@
       border: 1px solid #fecaca;
     }
 
-    .preview {
+    .previewGrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .previewImg {
       width: 100%;
-      max-height: 260px;
-      object-fit: contain;
-      margin-top: 10px;
+      height: 120px;
+      object-fit: cover;
       border-radius: 10px;
       border: 1px solid #e5e7eb;
-      display: none;
       background: #fafafa;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 6px;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Product Upload</h1>
-    <p>Add real clothing products with image upload.</p>
+    <p>Add product with multiple images, discount, and sizes.</p>
 
     <form id="productForm" enctype="multipart/form-data">
       <div class="field">
@@ -129,6 +140,11 @@
       <div class="field">
         <label for="price">Price</label>
         <input type="number" id="price" name="price" required />
+      </div>
+
+      <div class="field">
+        <label for="discount">Discount (%)</label>
+        <input type="number" id="discount" name="discount" min="0" max="100" value="0" />
       </div>
 
       <div class="field">
@@ -151,16 +167,24 @@
         <input
           type="text"
           id="sizes"
-          name="sizes"
-          placeholder="Example: S,M,L or 30,32,34"
+          placeholder='Example: ["S","M","L"] or ["30","32","34"]'
           required
         />
+        <div class="hint">Enter valid JSON array format only.</div>
       </div>
 
       <div class="field">
-        <label for="image">Product Image</label>
-        <input type="file" id="image" name="image" accept="image/*" required />
-        <img id="preview" class="preview" alt="Preview" />
+        <label for="images">Product Images</label>
+        <input
+          type="file"
+          id="images"
+          name="images"
+          accept="image/*"
+          multiple
+          required
+        />
+        <div class="hint">Select at least 1 image. You can upload multiple images.</div>
+        <div id="previewGrid" class="previewGrid"></div>
       </div>
 
       <button type="submit">Upload Product</button>
@@ -174,22 +198,25 @@
     const form = document.getElementById("productForm");
     const successMsg = document.getElementById("successMsg");
     const errorMsg = document.getElementById("errorMsg");
-    const imageInput = document.getElementById("image");
-    const preview = document.getElementById("preview");
+    const imagesInput = document.getElementById("images");
+    const previewGrid = document.getElementById("previewGrid");
+    const sizesInput = document.getElementById("sizes");
 
-    imageInput.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) {
-        preview.style.display = "none";
-        return;
-      }
+    imagesInput.addEventListener("change", (e) => {
+      previewGrid.innerHTML = "";
+      const files = Array.from(e.target.files || []);
 
-      const reader = new FileReader();
-      reader.onload = function (event) {
-        preview.src = event.target.result;
-        preview.style.display = "block";
-      };
-      reader.readAsDataURL(file);
+      files.forEach((file) => {
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          const img = document.createElement("img");
+          img.src = event.target.result;
+          img.className = "previewImg";
+          img.alt = "Preview";
+          previewGrid.appendChild(img);
+        };
+        reader.readAsDataURL(file);
+      });
     });
 
     form.addEventListener("submit", async (e) => {
@@ -198,11 +225,42 @@
       successMsg.style.display = "none";
       errorMsg.style.display = "none";
 
-      const formData = new FormData(form);
-
       try {
+        let parsedSizes;
+
+        try {
+          parsedSizes = JSON.parse(sizesInput.value.trim());
+          if (!Array.isArray(parsedSizes)) {
+            throw new Error("Sizes must be an array");
+          }
+        } catch (err) {
+          throw new Error('Sizes must be valid JSON array. Example: ["S","M","L"]');
+        }
+
+        const formData = new FormData();
+
+        formData.append("name", document.getElementById("name").value);
+        formData.append("description", document.getElementById("description").value);
+        formData.append("price", document.getElementById("price").value);
+        formData.append("discount", document.getElementById("discount").value);
+        formData.append("category", document.getElementById("category").value);
+        formData.append("stock", document.getElementById("stock").value);
+        formData.append("sizes", JSON.stringify(parsedSizes));
+
+        const files = Array.from(imagesInput.files || []);
+        if (files.length === 0) {
+          throw new Error("Please select at least one image");
+        }
+
+        files.forEach((file) => {
+          formData.append("images", file);
+        });
+
+        const token = localStorage.getItem("token");
+
         const res = await fetch("/api/products", {
           method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
         });
 
@@ -216,7 +274,7 @@
         successMsg.style.display = "block";
 
         form.reset();
-        preview.style.display = "none";
+        previewGrid.innerHTML = "";
       } catch (error) {
         errorMsg.textContent = error.message || "Something went wrong";
         errorMsg.style.display = "block";
