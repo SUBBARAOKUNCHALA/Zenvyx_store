@@ -97,7 +97,7 @@ exports.googleAuth = async (req, res) => {
                     _id: user._id,
                     name: user.name,
                     email: user.email,
-                    ProfilePic:user.profilePic,
+                    ProfilePic: user.profilePic,
                     token: generateToken(user._id),
                 },
             });
@@ -180,48 +180,78 @@ exports.login = async (req, res) => {
 exports.sendOtp = async (req, res) => {
     try {
         const { email } = req.body;
-        console.log("otp reqbody",email)
+        console.log("otp reqbody:", email);
 
-        const user = await User.findOne({ email });
-        console.log("user find for otp",user)
-
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required",
+            });
         }
 
-        // generate OTP
+        const user = await User.findOne({ email });
+        console.log("user find for otp:", user);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+            });
+        }
+
+        // Google-only user check
+        if (user.authProvider === "google" && !user.password) {
+            return res.status(400).json({
+                success: false,
+                message: "This account was created using Google. Please login with Google.",
+            });
+        }
+
+        // generate 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
+        // hash OTP before storing
         const hashedOtp = crypto
             .createHash("sha256")
             .update(otp)
             .digest("hex");
 
-        // delete previous OTPs for this email
+        // delete old OTPs for this email
         await SessionOtp.deleteMany({ email });
 
-        // store new OTP
+        // save new OTP
         await SessionOtp.create({
             email,
             otp: hashedOtp,
-            otpExpire: Date.now() + 5 * 60 * 1000, // 5 min
+            otpExpire: Date.now() + 5 * 60 * 1000, // 5 minutes
         });
 
-        // send email
+        // send OTP email using Resend
         await sendEmail(
             email,
             "Password Reset OTP",
-            "From: " + process.env.EMAIL_USER + "\nYour OTP is: " + otp + ". It is valid for 3 minutes."
+            `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h2 style="color: #333;">Password Reset OTP</h2>
+          <p>Your OTP is:</p>
+          <h1 style="letter-spacing: 4px; color: #2d89ef;">${otp}</h1>
+          <p>This OTP is valid for <b>5 minutes</b>.</p>
+          <p>If you did not request this, please ignore this email.</p>
+        </div>
+      `
         );
-        
-        res.json({
+
+        return res.status(200).json({
             success: true,
             message: "OTP sent to email",
         });
-
     } catch (error) {
-        console.log("err for otp",error)
-        res.status(500).json({ message: error.message });
+        console.log("err for otp:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Failed to send OTP",
+        });
     }
 };
 // @desc Validate OTP
