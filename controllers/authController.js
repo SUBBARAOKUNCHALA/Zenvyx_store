@@ -126,7 +126,7 @@ exports.googleAuth = async (req, res) => {
                 _id: user._id,
                 name: user.name,
                 email: user.email,
-                profilePic: user.picture,
+                profilePic: user.profilePic,
                 token: generateToken(user._id),
             },
         });
@@ -166,6 +166,7 @@ exports.login = async (req, res) => {
             data: {
                 _id: user._id,
                 email: user.email,
+                name: user.name,
                 token: generateToken(user._id),
             },
         });
