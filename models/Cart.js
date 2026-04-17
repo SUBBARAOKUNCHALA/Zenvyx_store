@@ -12,6 +12,10 @@ const cartSchema = new mongoose.Schema(
       ref: "Product",
       required: true,
     },
+    size: {
+      type: String,
+      default: "",
+    },
     quantity: {
       type: Number,
       required: true,
@@ -22,7 +26,7 @@ const cartSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// prevent duplicate same product for same user
-cartSchema.index({ userId: 1, productId: 1 }, { unique: true });
+// if you want same product with different sizes, use this:
+cartSchema.index({ userId: 1, productId: 1, size: 1 }, { unique: true });
 
 module.exports = mongoose.model("Cart", cartSchema);

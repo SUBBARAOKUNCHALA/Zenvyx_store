@@ -8,6 +8,8 @@ const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/productRoutes");
 const cartRoutes=require("./routes/cartRoutes")
+const addressRoutes=require("./routes/addressRoutes")
+const orderRoutes=require("./routes/orderRoutes")
 
 connectDB();
 
@@ -30,6 +32,8 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/cart", cartRoutes);
+app.use("/api/address", addressRoutes);
+app.use("/api/orders", orderRoutes);
 
 app.get("/", (req, res) => {
   res.send("API Running...");

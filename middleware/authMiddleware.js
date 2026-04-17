@@ -3,20 +3,44 @@ const jwt = require("jsonwebtoken");
 const protect = (req, res, next) => {
   let token = req.headers.authorization;
 
-  if (token && token.startsWith("Bearer")) {
-    try {
-      token = token.split(" ")[1];
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      code: "NO_TOKEN",
+      message: "No token provided",
+    });
+  }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  if (!token.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      code: "INVALID_FORMAT",
+      message: "Token must start with Bearer",
+    });
+  }
 
-      req.user = decoded; // ✅ better
+  try {
+    token = token.split(" ")[1];
 
-      next();
-    } catch (error) {
-      return res.status(401).json({ message: "Invalid token" });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    req.user = decoded;
+
+    next();
+  } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        code: "TOKEN_EXPIRED",
+        message: "Session expired, please login again",
+      });
     }
-  } else {
-    return res.status(401).json({ message: "No token provided" });
+
+    return res.status(401).json({
+      success: false,
+      code: "INVALID_TOKEN",
+      message: "Invalid token",
+    });
   }
 };
 
