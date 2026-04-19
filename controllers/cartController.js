@@ -6,7 +6,7 @@ const Product = require("../models/Product");
 exports.addToCart = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { productId, quantity } = req.body;
+    const { productId, quantity,size } = req.body;
 
     if (!productId) {
       return res.status(400).json({
@@ -51,6 +51,7 @@ exports.addToCart = async (req, res) => {
       userId,
       productId,
       quantity: qty,
+      size:size
     });
 
     const populatedCartItem = await Cart.findById(cartItem._id).populate("productId");

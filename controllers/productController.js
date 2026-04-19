@@ -22,41 +22,109 @@ const uploadFromBuffer = (fileBuffer) => {
 // @desc Add product
 // @route POST /api/products
 exports.addProduct = async (req, res) => {
-try {
-    const { name, description, price, category, stock, discount, sizes } = req.body;
-
-    const files = req.files; // from multer
-
-    const images = await uploadMultipleImages(files);
-
-    const parsedSizes = sizes ? JSON.parse(sizes) : [];
-
-    const product = await Product.create({
+  try {
+    const {
       name,
       description,
       price,
       category,
+      subCategory,
       stock,
       discount,
+      sizes,
+      tags,
+    } = req.body;
+
+    if (!name || !description || !price || !category) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, description, price, and category are required",
+      });
+    }
+
+    let parsedSizes = [];
+    if (sizes) {
+      try {
+        parsedSizes = JSON.parse(sizes);
+        if (!Array.isArray(parsedSizes)) {
+          return res.status(400).json({
+            success: false,
+            message: "Sizes must be an array",
+          });
+        }
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: 'Sizes must be valid JSON array. Example: ["S","M","L"]',
+        });
+      }
+    }
+
+    let parsedTags = [];
+    if (tags) {
+      try {
+        parsedTags = JSON.parse(tags);
+        if (!Array.isArray(parsedTags)) {
+          return res.status(400).json({
+            success: false,
+            message: "Tags must be an array",
+          });
+        }
+      } catch (error) {
+        parsedTags = String(tags)
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+    }
+
+    const files = req.files || [];
+
+    if (!files.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one product image is required",
+      });
+    }
+
+    if (files.length > 4) {
+      return res.status(400).json({
+        success: false,
+        message: "Maximum 4 images allowed",
+      });
+    }
+
+    const uploadedImages = await uploadMultipleImages(files, "products");
+
+    const product = await Product.create({
+      name: name.trim(),
+      description: description.trim(),
+      price: Number(price),
+      category,
+      subCategory,
+      stock: Number(stock || 0),
+      discount: Number(discount || 0),
       sizes: parsedSizes,
-      image: images[0], // fallback
-      images,
-      createdBy: req.userId,
+      tags: parsedTags,
+      image: uploadedImages[0] || "",
+      images: uploadedImages,
+      createdBy: req.user.userId,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
+      message: "Product added successfully",
       data: product,
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({
+  } catch (error) {
+    console.error("addProduct error:", error);
+    return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Failed to add product",
+      error: error.message,
     });
   }
 };
-
 // @desc Get all products
 // @route GET /api/products
 exports.getAllProducts = async (req, res) => {

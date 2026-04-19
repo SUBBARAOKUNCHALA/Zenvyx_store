@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -121,6 +122,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="container">
     <h1>Product Upload</h1>
@@ -158,31 +160,27 @@
       </div>
 
       <div class="field">
+        <label for="subCategory">Sub Category</label>
+        <select id="subCategory" name="subCategory" required>
+          <option value="">Select sub category</option>
+        </select>
+        <div class="hint">Sub category options will change based on selected category.</div>
+      </div>
+
+      <div class="field">
         <label for="stock">Stock</label>
         <input type="number" id="stock" name="stock" value="10" required />
       </div>
 
       <div class="field">
         <label for="sizes">Sizes</label>
-        <input
-          type="text"
-          id="sizes"
-          placeholder='Example: ["S","M","L"] or ["30","32","34"]'
-          required
-        />
+        <input type="text" id="sizes" placeholder='Example: ["S","M","L"] or ["30","32","34"]' required />
         <div class="hint">Enter valid JSON array format only.</div>
       </div>
 
       <div class="field">
         <label for="images">Product Images</label>
-        <input
-          type="file"
-          id="images"
-          name="images"
-          accept="image/*"
-          multiple
-          required
-        />
+        <input type="file" id="images" name="images" accept="image/*" multiple required />
         <div class="hint">Select at least 1 image. You can upload multiple images.</div>
         <div id="previewGrid" class="previewGrid"></div>
       </div>
@@ -195,91 +193,141 @@
   </div>
 
   <script>
-    const form = document.getElementById("productForm");
-    const successMsg = document.getElementById("successMsg");
-    const errorMsg = document.getElementById("errorMsg");
-    const imagesInput = document.getElementById("images");
-    const previewGrid = document.getElementById("previewGrid");
-    const sizesInput = document.getElementById("sizes");
+  const form = document.getElementById("productForm");
+  const successMsg = document.getElementById("successMsg");
+  const errorMsg = document.getElementById("errorMsg");
+  const imagesInput = document.getElementById("images");
+  const previewGrid = document.getElementById("previewGrid");
+  const sizesInput = document.getElementById("sizes");
+  const categorySelect = document.getElementById("category");
+  const subCategorySelect = document.getElementById("subCategory");
 
-    imagesInput.addEventListener("change", (e) => {
-      previewGrid.innerHTML = "";
-      const files = Array.from(e.target.files || []);
+  const subCategoryMap = {
+    "Shirt": [
+      "Formal Shirts",
+      "Casual Shirts",
+      "Printed Shirts",
+      "Party Wear",
+      "Trending Shirts"
+    ],
+    "T-Shirt": [
+      "Round Neck",
+      "Polo T-Shirts",
+      "Cotton T-Shirts"
+    ],
+    "Pant": [
+      "Jeans",
+      "Cargo Pants",
+      "Formal Pants"
+    ]
+  };
 
-      files.forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = function (event) {
-          const img = document.createElement("img");
-          img.src = event.target.result;
-          img.className = "previewImg";
-          img.alt = "Preview";
-          previewGrid.appendChild(img);
-        };
-        reader.readAsDataURL(file);
-      });
+  categorySelect.addEventListener("change", () => {
+    const selectedCategory = categorySelect.value;
+    const subCategories = subCategoryMap[selectedCategory] || [];
+
+    subCategorySelect.innerHTML = `<option value="">Select sub category</option>`;
+
+    subCategories.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item;
+      option.textContent = item;
+      subCategorySelect.appendChild(option);
     });
+  });
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+  imagesInput.addEventListener("change", (e) => {
+    previewGrid.innerHTML = "";
+    const files = Array.from(e.target.files || []);
 
-      successMsg.style.display = "none";
-      errorMsg.style.display = "none";
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = function (event) {
+        const img = document.createElement("img");
+        img.src = event.target.result;
+        img.className = "previewImg";
+        img.alt = "Preview";
+        previewGrid.appendChild(img);
+      };
+      reader.readAsDataURL(file);
+    });
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    successMsg.style.display = "none";
+    errorMsg.style.display = "none";
+
+    try {
+      let parsedSizes;
 
       try {
-        let parsedSizes;
-
-        try {
-          parsedSizes = JSON.parse(sizesInput.value.trim());
-          if (!Array.isArray(parsedSizes)) {
-            throw new Error("Sizes must be an array");
-          }
-        } catch (err) {
-          throw new Error('Sizes must be valid JSON array. Example: ["S","M","L"]');
+        parsedSizes = JSON.parse(sizesInput.value.trim());
+        if (!Array.isArray(parsedSizes)) {
+          throw new Error("Sizes must be an array");
         }
-
-        const formData = new FormData();
-
-        formData.append("name", document.getElementById("name").value);
-        formData.append("description", document.getElementById("description").value);
-        formData.append("price", document.getElementById("price").value);
-        formData.append("discount", document.getElementById("discount").value);
-        formData.append("category", document.getElementById("category").value);
-        formData.append("stock", document.getElementById("stock").value);
-        formData.append("sizes", JSON.stringify(parsedSizes));
-
-        const files = Array.from(imagesInput.files || []);
-        if (files.length === 0) {
-          throw new Error("Please select at least one image");
-        }
-
-        files.forEach((file) => {
-          formData.append("images", file);
-        });
-
-        const token = localStorage.getItem("token");
-
-        const res = await fetch("/api/products", {
-          method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: formData,
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.message || "Upload failed");
-        }
-
-        successMsg.textContent = data.message || "Product uploaded successfully";
-        successMsg.style.display = "block";
-
-        form.reset();
-        previewGrid.innerHTML = "";
-      } catch (error) {
-        errorMsg.textContent = error.message || "Something went wrong";
-        errorMsg.style.display = "block";
+      } catch (err) {
+        throw new Error('Sizes must be valid JSON array. Example: ["S","M","L"]');
       }
-    });
-  </script>
+
+      const formData = new FormData();
+
+      const selectedCategory = document.getElementById("category").value;
+      const selectedSubCategory = document.getElementById("subCategory").value;
+
+      if (!selectedCategory) {
+        throw new Error("Please select category");
+      }
+
+      if (!selectedSubCategory) {
+        throw new Error("Please select sub category");
+      }
+
+      formData.append("name", document.getElementById("name").value);
+      formData.append("description", document.getElementById("description").value);
+      formData.append("price", document.getElementById("price").value);
+      formData.append("discount", document.getElementById("discount").value);
+      formData.append("category", selectedCategory);
+      formData.append("subCategory", selectedSubCategory);
+      formData.append("stock", document.getElementById("stock").value);
+      formData.append("sizes", JSON.stringify(parsedSizes));
+
+      const files = Array.from(imagesInput.files || []);
+      if (files.length === 0) {
+        throw new Error("Please select at least one image");
+      }
+
+      files.forEach((file) => {
+        formData.append("images", file);
+      });
+
+      const token = localStorage.getItem("token");
+
+      const res = await fetch("/api/products", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Upload failed");
+      }
+
+      successMsg.textContent = data.message || "Product uploaded successfully";
+      successMsg.style.display = "block";
+
+      form.reset();
+      previewGrid.innerHTML = "";
+      subCategorySelect.innerHTML = `<option value="">Select sub category</option>`;
+    } catch (error) {
+      errorMsg.textContent = error.message || "Something went wrong";
+      errorMsg.style.display = "block";
+    }
+  });
+</script>
 </body>
+
 </html>

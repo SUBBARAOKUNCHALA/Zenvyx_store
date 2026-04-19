@@ -10,7 +10,7 @@ const productRoutes = require("./routes/productRoutes");
 const cartRoutes=require("./routes/cartRoutes")
 const addressRoutes=require("./routes/addressRoutes")
 const orderRoutes=require("./routes/orderRoutes")
-
+const adminRoutes = require("./routes/adminRoutes");
 connectDB();
 
 const app = express();
@@ -34,6 +34,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/address", addressRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/", (req, res) => {
   res.send("API Running...");
@@ -41,9 +42,9 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-console.log("Loaded CLOUDINARY_CLOUD_NAME:", process.env.CLOUDINARY_CLOUD_NAME);
-console.log("Loaded CLOUDINARY_API_KEY:", process.env.CLOUDINARY_API_KEY);
-console.log("Loaded CLOUDINARY_API_SECRET exists:", !!process.env.CLOUDINARY_API_SECRET);
+// console.log("Loaded CLOUDINARY_CLOUD_NAME:", process.env.CLOUDINARY_CLOUD_NAME);
+// console.log("Loaded CLOUDINARY_API_KEY:", process.env.CLOUDINARY_API_KEY);
+// console.log("Loaded CLOUDINARY_API_SECRET exists:", !!process.env.CLOUDINARY_API_SECRET);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

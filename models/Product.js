@@ -7,36 +7,57 @@ const productSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+
     description: {
       type: String,
       required: true,
       trim: true,
     },
+
     price: {
       type: Number,
       required: true,
     },
+
     category: {
       type: String,
       enum: ["Shirt", "T-Shirt", "Pant"],
       required: true,
     },
+
+    subCategory: {
+      type: String,
+      enum: [
+        "Formal Shirts",
+        "Casual Shirts",
+        "Printed Shirts",
+        "Party Wear",
+        "Trending Shirts",
+        "Round Neck",
+        "Polo T-Shirts",
+        "Cotton T-Shirts",
+        "Jeans",
+        "Cargo Pants",
+        "Formal Pants",
+      ],
+      default: "",
+    },
+
     stock: {
       type: Number,
       default: 0,
     },
+
     sizes: {
       type: [String],
       default: [],
     },
 
-    /* old single image */
     image: {
       type: String,
       default: "",
     },
 
-    /* new multiple images */
     images: {
       type: [String],
       validate: {
@@ -51,6 +72,11 @@ const productSchema = new mongoose.Schema(
     discount: {
       type: Number,
       default: 0,
+    },
+
+    tags: {
+      type: [String],
+      default: [],
     },
 
     createdBy: {
