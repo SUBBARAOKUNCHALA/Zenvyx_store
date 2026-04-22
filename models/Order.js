@@ -163,6 +163,7 @@ const orderSchema = new mongoose.Schema(
     orderStatus: {
       type: String,
       enum: [
+        "Placed",
         "Pending",
         "Confirmed",
         "Packed",
