@@ -153,6 +153,7 @@ const orderSchema = new mongoose.Schema(
         "Pending",
         "Paid",
         "Failed",
+        "Refund_Pending",
         "Refunded",
         "COD_Pending",
         "COD_Collected",

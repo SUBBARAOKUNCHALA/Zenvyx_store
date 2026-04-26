@@ -138,41 +138,87 @@ exports.googleAuth = async (req, res) => {
 };
 // @desc Login User
 // @route POST /api/auth/login
+// exports.login = async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+
+//         // validation
+//         if (!email || !password) {
+//             return res.status(400).json({ message: "Email & Password required" });
+//         }
+
+//         // check user
+//         const user = await User.findOne({ email });
+//         if (!user) {
+//             return res.status(401).json({ message: "Invalid credentials" });
+//         }
+
+//         // compare password
+//         const isMatch = await bcrypt.compare(password, user.password);
+
+//         if (!isMatch) {
+//             return res.status(401).json({ message: "Invalid credentials" });
+//         }
+
+//         res.json({
+//             success: true,
+//             message: "Login successful",
+//             data: {
+//                 _id: user._id,
+//                 email: user.email,
+//                 name: user.name,
+//                 token: generateToken(user._id),
+//             },
+//         });
+//     } catch (error) {
+//         res.status(500).json({ message: error.message });
+//     }
+// };
 exports.login = async (req, res) => {
-    try {
-        const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-        // validation
-        if (!email || !password) {
-            return res.status(400).json({ message: "Email & Password required" });
-        }
-
-        // check user
-        const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(401).json({ message: "Invalid credentials" });
-        }
-
-        // compare password
-        const isMatch = await bcrypt.compare(password, user.password);
-
-        if (!isMatch) {
-            return res.status(401).json({ message: "Invalid credentials" });
-        }
-
-        res.json({
-            success: true,
-            message: "Login successful",
-            data: {
-                _id: user._id,
-                email: user.email,
-                name: user.name,
-                token: generateToken(user._id),
-            },
-        });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email & Password required" });
     }
+
+    const user = await User.findOne({ email }).select("+password");
+
+    if (!user) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    if (!user.password) {
+      return res.status(400).json({
+        message: "This account has no password. Please login with Google.",
+      });
+    }
+
+    if (typeof user.password !== "string") {
+      return res.status(400).json({
+        message: "Password format is invalid. Please reset your password.",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    res.json({
+      success: true,
+      message: "Login successful",
+      data: {
+        _id: user._id,
+        email: user.email,
+        name: user.name,
+        token: generateToken(user._id),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 };
 
 

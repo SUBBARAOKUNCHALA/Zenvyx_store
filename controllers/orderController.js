@@ -140,7 +140,7 @@ exports.placeOrder = async (req, res) => {
 
   try {
     const userId = req.user.userId || req.user.id;
-    const { addressId, paymentMethod } = req.body;
+    const { addressId, paymentMethod, mode, item } = req.body;
 
     if (!addressId || !paymentMethod) {
       await session.abortTransaction();
@@ -169,17 +169,6 @@ exports.placeOrder = async (req, res) => {
       });
     }
 
-    const cartItems = await Cart.find({ userId }).populate("productId").session(session);
-
-    if (!cartItems || cartItems.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Cart is empty",
-      });
-    }
-
     const address = await Address.findOne({ _id: addressId, userId }).session(session);
 
     if (!address) {
@@ -191,24 +180,89 @@ exports.placeOrder = async (req, res) => {
       });
     }
 
+    let orderSourceItems = [];
+
+    // BUY NOW FLOW
+    if (mode === "buyNow") {
+      if (!item?.productId || !validateObjectId(item.productId)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Invalid buy now product",
+        });
+      }
+
+      const product = await Product.findById(item.productId).session(session);
+
+      if (!product) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          message: "Product not found",
+        });
+      }
+
+      orderSourceItems = [
+        {
+          product,
+          quantity: Number(item.quantity || 1),
+          size: item.size || "",
+        },
+      ];
+    } 
+    // CART FLOW
+    else {
+      const cartItems = await Cart.find({ userId })
+        .populate("productId")
+        .session(session);
+
+      if (!cartItems || cartItems.length === 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Cart is empty",
+        });
+      }
+
+      orderSourceItems = cartItems.map((cartItem) => ({
+        product: cartItem.productId,
+        quantity: Number(cartItem.quantity || 1),
+        size: cartItem.size || "",
+        cartItemId: cartItem._id,
+      }));
+    }
+
     let totalItems = 0;
     let subtotalAmount = 0;
+    let discountAmount = 0;
     const orderItems = [];
 
-    for (const item of cartItems) {
-      const product = item.productId;
+    for (const itemData of orderSourceItems) {
+      const product = itemData.product;
 
       if (!product) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
           success: false,
-          message: "One or more products in cart no longer exist",
+          message: "One or more products no longer exist",
         });
       }
 
-      const quantity = Number(item.quantity || 1);
+      const quantity = Number(itemData.quantity || 1);
       const currentStock = Number(product.stock || 0);
+
+      if (quantity <= 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Invalid quantity",
+        });
+      }
 
       if (currentStock < quantity) {
         await session.abortTransaction();
@@ -219,30 +273,32 @@ exports.placeOrder = async (req, res) => {
         });
       }
 
-      const originalPrice = Number(product.originalPrice || product.price || 0);
       const price = Number(product.price || 0);
-      const discount = originalPrice > price ? originalPrice - price : 0;
-      const subtotal = price * quantity;
+      const discountPercent = Number(product.discount || 0);
+
+      const itemDiscountAmount = Math.round((price * discountPercent) / 100);
+      const finalPrice = price - itemDiscountAmount;
+      const subtotal = finalPrice * quantity;
 
       totalItems += quantity;
       subtotalAmount += subtotal;
+      discountAmount += itemDiscountAmount * quantity;
 
       orderItems.push({
         productId: product._id,
         name: product.name || "",
         image: product.image || product.images?.[0] || "",
-        price,
-        originalPrice,
-        discount,
+        price: finalPrice,
+        originalPrice: price,
+        discount: discountAmount,
         quantity,
-        size: item.size || "",
+        size: itemData.size || "",
         subtotal,
       });
     }
 
     const deliveryCharge = calculateDeliveryCharge(subtotalAmount);
-    const discountAmount = 0;
-    const finalAmount = subtotalAmount + deliveryCharge - discountAmount;
+    const finalAmount = subtotalAmount + deliveryCharge;
 
     let orderNumber = generateOrderNumber();
     let exists = await Order.findOne({ orderNumber }).session(session);
@@ -267,6 +323,7 @@ exports.placeOrder = async (req, res) => {
           paymentMethod,
           paymentStatus: getPaymentStatusFromMethod(paymentMethod),
           orderStatus: "Placed",
+          orderType: mode === "buyNow" ? "Buy Now" : "Cart",
           statusHistory: [
             {
               status: "Placed",
@@ -279,18 +336,17 @@ exports.placeOrder = async (req, res) => {
       { session }
     );
 
-    for (const item of cartItems) {
-      const product = item.productId;
-      const quantity = Number(item.quantity || 1);
-
+    for (const itemData of orderSourceItems) {
       await Product.updateOne(
-        { _id: product._id, stock: { $gte: quantity } },
-        { $inc: { stock: -quantity } },
+        { _id: itemData.product._id, stock: { $gte: itemData.quantity } },
+        { $inc: { stock: -itemData.quantity } },
         { session }
       );
     }
 
-    await Cart.deleteMany({ userId }).session(session);
+    if (mode !== "buyNow") {
+      await Cart.deleteMany({ userId }).session(session);
+    }
 
     await session.commitTransaction();
     session.endSession();
@@ -612,6 +668,112 @@ exports.updateOrderStatusByAdmin = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to update order status",
+      error: error.message,
+    });
+  }
+};
+
+exports.returnMyOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const userId = req.user.userId || req.user.id;
+    const { orderId } = req.params;
+    const { reason } = req.body;
+
+    if (!validateObjectId(orderId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order id",
+      });
+    }
+
+    const order = await Order.findOne({ _id: orderId, userId }).session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // ✅ Only delivered orders can be returned
+    if (order.orderStatus !== "Delivered") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Only delivered orders can be returned",
+      });
+    }
+
+    // ✅ prevent duplicate return
+    if (order.orderStatus === "Returned") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Return already requested",
+      });
+    }
+
+    // OPTIONAL: Return within 7 days
+    if (order.deliveredAt) {
+      const diffDays =
+        (new Date() - new Date(order.deliveredAt)) / (1000 * 60 * 60 * 24);
+
+      if (diffDays > 7) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Return window expired (7 days)",
+        });
+      }
+    }
+
+    // ✅ Update status
+    order.orderStatus = "Returned";
+    order.returnReason = reason || "Return requested by user";
+    order.returnRequestedAt = new Date();
+    order.returnedBy = "user";
+
+    // Payment handling
+    if (order.paymentMethod === "COD") {
+      order.paymentStatus = "Refund_Pending";
+    } else {
+      order.paymentStatus = "Refund_Processing";
+    }
+
+    order.statusHistory.push({
+      status: "Returned",
+      note: reason || "Return requested by user",
+      changedAt: new Date(),
+    });
+
+    await order.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: "Return request submitted successfully",
+      data: order,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("returnMyOrder error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to request return",
       error: error.message,
     });
   }

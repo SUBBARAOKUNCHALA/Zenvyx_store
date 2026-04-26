@@ -12,6 +12,7 @@ const {
   cancelMyOrder,
   getAllOrders,
   updateOrderStatusByAdmin,
+  returnMyOrder
 } = require("../controllers/orderController");
 
 router.get("/checkout-summary", protect, getCheckoutSummary);
@@ -19,6 +20,7 @@ router.post("/place", protect, placeOrder);
 router.get("/my-orders", protect, getMyOrders);
 router.get("/:orderId", protect, getOrderById);
 router.put("/:orderId/cancel", protect, cancelMyOrder);
+router.put("/:orderId/return", protect, returnMyOrder);
 
 // admin
 // router.get("/admin/all", protect, getAllOrders);
