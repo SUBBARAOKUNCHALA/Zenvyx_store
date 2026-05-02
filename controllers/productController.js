@@ -4,19 +4,19 @@ const streamifier = require("streamifier");
 const { uploadMultipleImages } = require("../utils/cloudinaryUpload");
 
 const uploadFromBuffer = (fileBuffer) => {
-    return new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-            {
-                folder: "ecommerce_products",
-            },
-            (error, result) => {
-                if (result) resolve(result);
-                else reject(error);
-            }
-        );
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "ecommerce_products",
+      },
+      (error, result) => {
+        if (result) resolve(result);
+        else reject(error);
+      }
+    );
 
-        streamifier.createReadStream(fileBuffer).pipe(stream);
-    });
+    streamifier.createReadStream(fileBuffer).pipe(stream);
+  });
 };
 
 // @desc Add product
@@ -26,6 +26,7 @@ exports.addProduct = async (req, res) => {
     const {
       name,
       description,
+      ProductDetails,
       price,
       category,
       subCategory,
@@ -35,10 +36,10 @@ exports.addProduct = async (req, res) => {
       tags,
     } = req.body;
 
-    if (!name || !description || !price || !category) {
+    if (!name || !description || !price || !category || !ProductDetails) {
       return res.status(400).json({
         success: false,
-        message: "Name, description, price, and category are required",
+        message: "Name, description,ProductDetails, price, and category are required",
       });
     }
 
@@ -96,9 +97,25 @@ exports.addProduct = async (req, res) => {
 
     const uploadedImages = await uploadMultipleImages(files, "products");
 
+    const createdBy =
+      req.user?.userId ||
+      req.user?.id ||
+      req.user?._id ||
+      req.admin?.userId ||
+      req.admin?.id ||
+      req.admin?._id;
+
+    if (!createdBy) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin token missing or invalid",
+      });
+    }
+
     const product = await Product.create({
       name: name.trim(),
       description: description.trim(),
+      ProductDetails: ProductDetails.trim(),
       price: Number(price),
       category,
       subCategory,
@@ -108,7 +125,7 @@ exports.addProduct = async (req, res) => {
       tags: parsedTags,
       image: uploadedImages[0] || "",
       images: uploadedImages,
-      createdBy: req.user.userId,
+      createdBy: createdBy,
     });
 
     return res.status(201).json({
@@ -128,25 +145,25 @@ exports.addProduct = async (req, res) => {
 // @desc Get all products
 // @route GET /api/products
 exports.getAllProducts = async (req, res) => {
-    try {
-        const products = await Product.find().sort({ createdAt: -1 });
+  try {
+    const products = await Product.find().sort({ createdAt: -1 });
 
-        res.status(200).json({
-            success: true,
-            count: products.length,
-            data: products,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      data: products,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
 };
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const { name, description, price, category, stock, discount, sizes } = req.body;
+    const { name, description, ProductDetails, price, category, stock, discount, sizes } = req.body;
 
     const product = await Product.findById(productId);
     if (!product) {
@@ -163,6 +180,7 @@ exports.updateProduct = async (req, res) => {
 
     product.name = name || product.name;
     product.description = description || product.description;
+    product.ProductDetails = ProductDetails || product.ProductDetails;
     product.price = price || product.price;
     product.category = category || product.category;
     product.stock = stock || product.stock;
