@@ -3,7 +3,7 @@ const Cart = require("../models/Cart");
 const Address = require("../models/Address");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
-
+const ReturnOrder = require("../models/ReturnOrder")
 const ALLOWED_PAYMENT_METHODS = ["COD", "RAZORPAY", "UPI"];
 const USER_CANCELLABLE_STATUSES = ["Placed", "Confirmed"];
 const ADMIN_UPDATABLE_STATUSES = [
@@ -55,7 +55,7 @@ exports.getCheckoutSummary = async (req, res) => {
     const userId = req.user.userId || req.user.id;
 
     const cartItems = await Cart.find({ userId }).populate("productId");
-    console.log("Chekout item",cartItems)
+    console.log("Chekout item", cartItems)
 
     if (!cartItems || cartItems.length === 0) {
       return res.status(400).json({
@@ -80,7 +80,7 @@ exports.getCheckoutSummary = async (req, res) => {
 
       const price = Number(product.price || 0);
       const quantity = Number(item.quantity || 1);
-      const discount=Number(product.discount || 0)
+      const discount = Number(product.discount || 0)
       const subtotal = price * quantity;
 
       totalItems += quantity;
@@ -211,7 +211,7 @@ exports.placeOrder = async (req, res) => {
           size: item.size || "",
         },
       ];
-    } 
+    }
     // CART FLOW
     else {
       const cartItems = await Cart.find({ userId })
@@ -375,10 +375,24 @@ exports.getMyOrders = async (req, res) => {
 
     const orders = await Order.find({ userId }).sort({ createdAt: -1 });
 
+    const ordersWithReturnData = await Promise.all(
+      orders.map(async (order) => {
+        const returnData = await ReturnOrder.findOne({
+          orderId: order._id,
+          userId,
+        });
+
+        return {
+          ...order.toObject(),
+          returnData: returnData || null,
+        };
+      })
+    );
+
     return res.status(200).json({
       success: true,
-      count: orders.length,
-      data: orders,
+      count: ordersWithReturnData.length,
+      data: ordersWithReturnData,
     });
   } catch (error) {
     console.error("getMyOrders error:", error);
@@ -389,7 +403,6 @@ exports.getMyOrders = async (req, res) => {
     });
   }
 };
-
 exports.getOrderById = async (req, res) => {
   try {
     const userId = req.user.userId || req.user.id;
@@ -674,106 +687,279 @@ exports.updateOrderStatusByAdmin = async (req, res) => {
 };
 
 exports.returnMyOrder = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const userId = req.user.userId || req.user.id;
     const { orderId } = req.params;
     const { reason } = req.body;
 
-    if (!validateObjectId(orderId)) {
-      await session.abortTransaction();
-      session.endSession();
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid order id",
       });
     }
 
-    const order = await Order.findOne({ _id: orderId, userId }).session(session);
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: "Return reason is required",
+      });
+    }
+
+    const order = await Order.findOne({ _id: orderId, userId });
 
     if (!order) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(404).json({
         success: false,
         message: "Order not found",
       });
     }
 
-    // ✅ Only delivered orders can be returned
     if (order.orderStatus !== "Delivered") {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Only delivered orders can be returned",
       });
     }
 
-    // ✅ prevent duplicate return
-    if (order.orderStatus === "Returned") {
-      await session.abortTransaction();
-      session.endSession();
+    const alreadyReturn = await ReturnOrder.findOne({ orderId });
+
+    if (alreadyReturn) {
       return res.status(400).json({
         success: false,
-        message: "Return already requested",
+        message: "Return request already submitted",
       });
     }
 
-    // OPTIONAL: Return within 7 days
-    if (order.deliveredAt) {
-      const diffDays =
-        (new Date() - new Date(order.deliveredAt)) / (1000 * 60 * 60 * 24);
+    const returnOrder = await ReturnOrder.create({
+      orderId: order._id,
+      userId,
+      orderNumber: order.orderNumber,
+      items: order.items,
+      customerAddress: order.address,
+      returnReason: reason,
+      refundAmount: order.finalAmount,
+      returnStatus: "ReturnRequested",
+      statusHistory: [
+        {
+          status: "ReturnRequested",
+          note: reason,
+          changedAt: new Date(),
+        },
+      ],
+    });
 
-      if (diffDays > 7) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: "Return window expired (7 days)",
-        });
-      }
-    }
-
-    // ✅ Update status
-    order.orderStatus = "Returned";
-    order.returnReason = reason || "Return requested by user";
-    order.returnRequestedAt = new Date();
-    order.returnedBy = "user";
-
-    // Payment handling
-    if (order.paymentMethod === "COD") {
-      order.paymentStatus = "Refund_Pending";
-    } else {
-      order.paymentStatus = "Refund_Processing";
-    }
+    order.orderStatus = "ReturnRequested";
+    order.paymentStatus = "Refund_Pending";
 
     order.statusHistory.push({
-      status: "Returned",
-      note: reason || "Return requested by user",
+      status: "ReturnRequested",
+      note: reason,
       changedAt: new Date(),
     });
 
-    await order.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
+    await order.save();
 
     return res.status(200).json({
       success: true,
       message: "Return request submitted successfully",
-      data: order,
+      data: returnOrder,
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
     console.error("returnMyOrder error:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to request return",
+      error: error.message,
+    });
+  }
+};
+
+exports.getReturnedOrders = async (req, res) => {
+  try {
+    const returnedOrders = await ReturnOrder.find()
+      .populate("userId", "name email")
+      .populate("orderId")
+      .sort({ createdAt: -1 });
+    //console.log("Subbu")
+
+    return res.status(200).json({
+      success: true,
+      count: returnedOrders.length,
+      data: returnedOrders,
+    });
+  } catch (error) {
+    console.error("getReturnedOrders error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch returned orders",
+      error: error.message,
+    });
+  }
+};
+
+exports.updateReturnStatusByAdmin = async (req, res) => {
+  try {
+    const { returnId } = req.params;
+
+    const {
+      returnStatus,
+      pickupDate,
+      pickupPartner,
+      pickupTrackingId,
+      refundMode,
+      refundTransactionId,
+      adminNote,
+    } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(returnId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid return id",
+      });
+    }
+
+    const allowedStatuses = [
+      "ReturnAccepted",
+      "PickedUp",
+      "Refunded",
+      "Rejected",
+    ];
+
+    if (!allowedStatuses.includes(returnStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid return status",
+      });
+    }
+
+    const returnOrder = await ReturnOrder.findById(returnId);
+
+    if (!returnOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Return order not found",
+      });
+    }
+
+    const order = await Order.findById(returnOrder.orderId);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Original order not found",
+      });
+    }
+
+    const currentStatus = returnOrder.returnStatus;
+
+    const validFlow = {
+      ReturnRequested: ["ReturnAccepted", "Rejected"],
+      ReturnAccepted: ["PickedUp"],
+      PickedUp: ["Refunded"],
+      Refunded: [],
+      Rejected: [],
+    };
+
+    if (!validFlow[currentStatus].includes(returnStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot change return status from ${currentStatus} to ${returnStatus}`,
+      });
+    }
+
+    returnOrder.returnStatus = returnStatus;
+
+    if (pickupDate !== undefined) {
+      returnOrder.pickupDate = pickupDate ? new Date(pickupDate) : null;
+    }
+
+    if (pickupPartner !== undefined) {
+      returnOrder.pickupPartner = pickupPartner;
+    }
+
+    if (pickupTrackingId !== undefined) {
+      returnOrder.pickupTrackingId = pickupTrackingId;
+    }
+
+    if (adminNote !== undefined) {
+      returnOrder.adminNote = adminNote;
+    }
+
+    if (returnStatus === "ReturnAccepted") {
+      order.paymentStatus = "Refund_Pending";
+    }
+
+    if (returnStatus === "PickedUp") {
+      returnOrder.pickedUpAt = new Date();
+
+      for (const item of returnOrder.items) {
+        await Product.updateOne(
+          { _id: item.productId },
+          { $inc: { stock: item.quantity } }
+        );
+      }
+    }
+
+    if (returnStatus === "Refunded") {
+      returnOrder.refundedAt = new Date();
+      returnOrder.refundMode = refundMode || "Manual";
+      returnOrder.refundTransactionId = refundTransactionId || "";
+
+      order.paymentStatus = "Refunded";
+    }
+
+    if (returnStatus === "Rejected") {
+      order.orderStatus = "Delivered";
+      order.paymentStatus =
+        order.paymentMethod === "COD" ? "COD_Collected" : "Paid";
+    }
+
+    if (returnStatus !== "Rejected") {
+      order.orderStatus = "ReturnRequested";
+    }
+
+    // returnOrder.statusHistory.push({
+    //   status: returnStatus,
+    //   note: adminNote || `Return status changed from ${currentStatus} to ${returnStatus}`,
+    //   changedAt: new Date(),
+    // });
+
+    // order.statusHistory.push({
+    //   status: returnStatus,
+    //   note: adminNote || `Return status changed from ${currentStatus} to ${returnStatus}`,
+    //   changedAt: new Date(),
+    // });
+
+    returnOrder.statusHistory.push({
+      status: returnStatus,
+      note:
+        adminNote ||
+        `Return status changed from ${currentStatus} to ${returnStatus}`,
+      changedAt: historyDate,
+    });
+
+    order.statusHistory.push({
+      status: returnStatus,
+      note:
+        adminNote ||
+        `Return status changed from ${currentStatus} to ${returnStatus}`,
+      changedAt: historyDate,
+    });
+
+    await returnOrder.save();
+    await order.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Return status updated successfully",
+      data: returnOrder,
+    });
+  } catch (error) {
+    console.error("updateReturnStatusByAdmin error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update return status",
       error: error.message,
     });
   }
