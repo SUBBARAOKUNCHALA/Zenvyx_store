@@ -11,6 +11,7 @@ const cartRoutes=require("./routes/cartRoutes")
 const addressRoutes=require("./routes/addressRoutes")
 const orderRoutes=require("./routes/orderRoutes")
 const adminRoutes = require("./routes/adminRoutes");
+const PaymentRoutes=require("./routes/paymentRoutes")
 connectDB();
 
 const app = express();
@@ -35,7 +36,7 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/address", addressRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
-
+app.use("/api/payment", PaymentRoutes);
 app.get("/", (req, res) => {
   res.send("API Running...");
 });

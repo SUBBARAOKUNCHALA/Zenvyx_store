@@ -143,7 +143,7 @@ const orderSchema = new mongoose.Schema(
 
     paymentMethod: {
       type: String,
-      enum: ["COD", "RAZORPAY", "UPI"],
+      enum: ["COD", "RAZORPAY", "UPI", "NET_BANKING"],
       required: true,
     },
 
@@ -178,6 +178,9 @@ const orderSchema = new mongoose.Schema(
       ],
       default: "Pending",
     },
+    razorpayOrderId: String,
+    razorpayPaymentId: String,
+    razorpaySignature: String,
 
     statusHistory: {
       type: [statusHistorySchema],
