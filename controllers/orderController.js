@@ -3,8 +3,9 @@ const Cart = require("../models/Cart");
 const Address = require("../models/Address");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const razorpay = require("../config/razorpay");
 const ReturnOrder = require("../models/ReturnOrder")
-const ALLOWED_PAYMENT_METHODS = ["COD", "RAZORPAY", "UPI"];
+const ALLOWED_PAYMENT_METHODS = ["COD", "RAZORPAY", "UPI", "NET_BANKING"];
 const USER_CANCELLABLE_STATUSES = ["Placed", "Confirmed"];
 const ADMIN_UPDATABLE_STATUSES = [
   "Placed",
@@ -140,7 +141,8 @@ exports.placeOrder = async (req, res) => {
 
   try {
     const userId = req.user.userId || req.user.id;
-    const { addressId, paymentMethod, mode, item } = req.body;
+    const { addressId, paymentMethod, mode, item, razorpayOrderId, razorpayPaymentId, razorpaySignature, paymentStatus, } = req.body;
+    console.log("UPI PAyment Order ReqBody", req.body)
 
     if (!addressId || !paymentMethod) {
       await session.abortTransaction();
@@ -211,9 +213,8 @@ exports.placeOrder = async (req, res) => {
           size: item.size || "",
         },
       ];
-    }
-    // CART FLOW
-    else {
+    } else {
+      // CART FLOW
       const cartItems = await Cart.find({ userId })
         .populate("productId")
         .session(session);
@@ -253,6 +254,7 @@ exports.placeOrder = async (req, res) => {
       }
 
       const quantity = Number(itemData.quantity || 1);
+      const selectedSize = itemData.size || "";
       const currentStock = Number(product.stock || 0);
 
       if (quantity <= 0) {
@@ -264,6 +266,47 @@ exports.placeOrder = async (req, res) => {
         });
       }
 
+      // ✅ Normalize old + new size format
+      const normalizedSizes = (product.sizes || []).map((s) => {
+        if (typeof s === "string") {
+          return {
+            size: s,
+            stock: Number(product.stock || 0),
+          };
+        }
+
+        return {
+          size: s.size,
+          stock: Number(s.stock || 0),
+        };
+      });
+
+      // ✅ Size-wise stock check
+      if (selectedSize) {
+        const selectedSizeObj = normalizedSizes.find(
+          (s) => String(s.size) === String(selectedSize)
+        );
+
+        if (!selectedSizeObj) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `${product.name} size ${selectedSize} is not available`,
+          });
+        }
+
+        if (selectedSizeObj.stock < quantity) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `${product.name} size ${selectedSize} is out of stock`,
+          });
+        }
+      }
+
+      // ✅ Global stock fallback check
       if (currentStock < quantity) {
         await session.abortTransaction();
         session.endSession();
@@ -290,9 +333,9 @@ exports.placeOrder = async (req, res) => {
         image: product.image || product.images?.[0] || "",
         price: finalPrice,
         originalPrice: price,
-        discount: discountAmount,
+        discount: itemDiscountAmount * quantity,
         quantity,
-        size: itemData.size || "",
+        size: selectedSize,
         subtotal,
       });
     }
@@ -321,9 +364,28 @@ exports.placeOrder = async (req, res) => {
           discountAmount,
           finalAmount,
           paymentMethod,
-          paymentStatus: getPaymentStatusFromMethod(paymentMethod),
+          //paymentStatus: getPaymentStatusFromMethod(paymentMethod),
+          paymentStatus:
+            paymentStatus ||
+            (["UPI", "NET_BANKING"].includes(paymentMethod)
+              ? "Paid"
+              : getPaymentStatusFromMethod(paymentMethod)),
           orderStatus: "Placed",
           orderType: mode === "buyNow" ? "Buy Now" : "Cart",
+          razorpayOrderId:
+            ["UPI", "NET_BANKING"].includes(paymentMethod)
+              ? razorpayOrderId
+              : undefined,
+
+          razorpayPaymentId:
+            ["UPI", "NET_BANKING"].includes(paymentMethod)
+              ? razorpayPaymentId
+              : undefined,
+
+          razorpaySignature:
+            ["UPI", "NET_BANKING"].includes(paymentMethod)
+              ? razorpaySignature
+              : undefined,
           statusHistory: [
             {
               status: "Placed",
@@ -336,12 +398,40 @@ exports.placeOrder = async (req, res) => {
       { session }
     );
 
+    // ✅ Reduce stock after successful order creation
     for (const itemData of orderSourceItems) {
-      await Product.updateOne(
-        { _id: itemData.product._id, stock: { $gte: itemData.quantity } },
-        { $inc: { stock: -itemData.quantity } },
-        { session }
-      );
+      const quantity = Number(itemData.quantity || 1);
+
+      if (itemData.size) {
+        await Product.updateOne(
+          {
+            _id: itemData.product._id,
+            "sizes.size": itemData.size,
+            "sizes.stock": { $gte: quantity },
+            stock: { $gte: quantity },
+          },
+          {
+            $inc: {
+              "sizes.$.stock": -quantity,
+              stock: -quantity,
+            },
+          },
+          { session }
+        );
+      } else {
+        await Product.updateOne(
+          {
+            _id: itemData.product._id,
+            stock: { $gte: quantity },
+          },
+          {
+            $inc: {
+              stock: -quantity,
+            },
+          },
+          { session }
+        );
+      }
     }
 
     if (mode !== "buyNow") {
@@ -368,6 +458,241 @@ exports.placeOrder = async (req, res) => {
     });
   }
 };
+
+// exports.placeOrder = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     const userId = req.user.userId || req.user.id;
+//     const { addressId, paymentMethod, mode, item } = req.body;
+
+//     if (!addressId || !paymentMethod) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "Address and payment method are required",
+//       });
+//     }
+
+//     if (!validateObjectId(addressId)) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid address id",
+//       });
+//     }
+
+//     if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid payment method",
+//       });
+//     }
+
+//     const address = await Address.findOne({ _id: addressId, userId }).session(session);
+
+//     if (!address) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(404).json({
+//         success: false,
+//         message: "Address not found",
+//       });
+//     }
+
+//     let orderSourceItems = [];
+
+//     // BUY NOW FLOW
+//     if (mode === "buyNow") {
+//       if (!item?.productId || !validateObjectId(item.productId)) {
+//         await session.abortTransaction();
+//         session.endSession();
+//         return res.status(400).json({
+//           success: false,
+//           message: "Invalid buy now product",
+//         });
+//       }
+
+//       const product = await Product.findById(item.productId).session(session);
+
+//       if (!product) {
+//         await session.abortTransaction();
+//         session.endSession();
+//         return res.status(404).json({
+//           success: false,
+//           message: "Product not found",
+//         });
+//       }
+
+//       orderSourceItems = [
+//         {
+//           product,
+//           quantity: Number(item.quantity || 1),
+//           size: item.size || "",
+//         },
+//       ];
+//     }
+//     // CART FLOW
+//     else {
+//       const cartItems = await Cart.find({ userId })
+//         .populate("productId")
+//         .session(session);
+
+//       if (!cartItems || cartItems.length === 0) {
+//         await session.abortTransaction();
+//         session.endSession();
+//         return res.status(400).json({
+//           success: false,
+//           message: "Cart is empty",
+//         });
+//       }
+
+//       orderSourceItems = cartItems.map((cartItem) => ({
+//         product: cartItem.productId,
+//         quantity: Number(cartItem.quantity || 1),
+//         size: cartItem.size || "",
+//         cartItemId: cartItem._id,
+//       }));
+//     }
+
+//     let totalItems = 0;
+//     let subtotalAmount = 0;
+//     let discountAmount = 0;
+//     const orderItems = [];
+
+//     for (const itemData of orderSourceItems) {
+//       const product = itemData.product;
+
+//       if (!product) {
+//         await session.abortTransaction();
+//         session.endSession();
+//         return res.status(400).json({
+//           success: false,
+//           message: "One or more products no longer exist",
+//         });
+//       }
+
+//       const quantity = Number(itemData.quantity || 1);
+//       const currentStock = Number(product.stock || 0);
+
+//       if (quantity <= 0) {
+//         await session.abortTransaction();
+//         session.endSession();
+//         return res.status(400).json({
+//           success: false,
+//           message: "Invalid quantity",
+//         });
+//       }
+
+//       if (currentStock < quantity) {
+//         await session.abortTransaction();
+//         session.endSession();
+//         return res.status(400).json({
+//           success: false,
+//           message: `${product.name} is out of stock or has insufficient quantity`,
+//         });
+//       }
+
+//       const price = Number(product.price || 0);
+//       const discountPercent = Number(product.discount || 0);
+
+//       const itemDiscountAmount = Math.round((price * discountPercent) / 100);
+//       const finalPrice = price - itemDiscountAmount;
+//       const subtotal = finalPrice * quantity;
+
+//       totalItems += quantity;
+//       subtotalAmount += subtotal;
+//       discountAmount += itemDiscountAmount * quantity;
+
+//       orderItems.push({
+//         productId: product._id,
+//         name: product.name || "",
+//         image: product.image || product.images?.[0] || "",
+//         price: finalPrice,
+//         originalPrice: price,
+//         discount: discountAmount,
+//         quantity,
+//         size: itemData.size || "",
+//         subtotal,
+//       });
+//     }
+
+//     const deliveryCharge = calculateDeliveryCharge(subtotalAmount);
+//     const finalAmount = subtotalAmount + deliveryCharge;
+
+//     let orderNumber = generateOrderNumber();
+//     let exists = await Order.findOne({ orderNumber }).session(session);
+
+//     while (exists) {
+//       orderNumber = generateOrderNumber();
+//       exists = await Order.findOne({ orderNumber }).session(session);
+//     }
+
+//     const order = await Order.create(
+//       [
+//         {
+//           orderNumber,
+//           userId,
+//           items: orderItems,
+//           address: buildAddressSnapshot(address),
+//           totalItems,
+//           subtotalAmount,
+//           deliveryCharge,
+//           discountAmount,
+//           finalAmount,
+//           paymentMethod,
+//           paymentStatus: getPaymentStatusFromMethod(paymentMethod),
+//           orderStatus: "Placed",
+//           orderType: mode === "buyNow" ? "Buy Now" : "Cart",
+//           statusHistory: [
+//             {
+//               status: "Placed",
+//               note: "Order placed successfully",
+//               changedAt: new Date(),
+//             },
+//           ],
+//         },
+//       ],
+//       { session }
+//     );
+
+//     for (const itemData of orderSourceItems) {
+//       await Product.updateOne(
+//         { _id: itemData.product._id, stock: { $gte: itemData.quantity } },
+//         { $inc: { stock: -itemData.quantity } },
+//         { session }
+//       );
+//     }
+
+//     if (mode !== "buyNow") {
+//       await Cart.deleteMany({ userId }).session(session);
+//     }
+
+//     await session.commitTransaction();
+//     session.endSession();
+
+//     return res.status(201).json({
+//       success: true,
+//       message: "Order placed successfully",
+//       data: order[0],
+//     });
+//   } catch (error) {
+//     await session.abortTransaction();
+//     session.endSession();
+
+//     console.error("placeOrder error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to place order",
+//       error: error.message,
+//     });
+//   }
+// };
 
 exports.getMyOrders = async (req, res) => {
   try {
@@ -476,12 +801,71 @@ exports.cancelMyOrder = async (req, res) => {
       });
     }
 
+    const isOnlinePaidOrder =
+      ["UPI", "NET_BANKING", "RAZORPAY"].includes(order.paymentMethod) &&
+      order.paymentStatus === "Paid" &&
+      order.razorpayPaymentId;
+
+    let refund = null;
+
+    if (isOnlinePaidOrder) {
+      const refundAmountInPaise = Math.round(Number(order.finalAmount || 0) * 100);
+
+      refund = await razorpay.payments.refund(order.razorpayPaymentId, {
+        amount: refundAmountInPaise,
+        speed: "optimum",
+        notes: {
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          reason: reason || "Cancelled by user",
+        },
+      });
+
+      if (order.refundId) {
+        return res.status(400).json({
+          success: false,
+          message: "Refund already initiated",
+        });
+      }
+
+      order.paymentStatus =
+        refund.status === "processed" ? "Refunded" : "Refund_Pending";
+
+      order.refundId = refund.id;
+      order.refundStatus = refund.status || "created";
+      order.refundAmount = refund.amount ? refund.amount / 100 : order.finalAmount;
+
+      if (refund.status === "processed") {
+        order.refundedAt = new Date();
+      }
+    }
+
+    if (order.paymentMethod === "COD") {
+      order.paymentStatus = "COD_Pending";
+    }
+
     for (const item of order.items) {
-      await Product.updateOne(
-        { _id: item.productId },
-        { $inc: { stock: item.quantity } },
-        { session }
-      );
+      if (item.size) {
+        await Product.updateOne(
+          {
+            _id: item.productId,
+            "sizes.size": item.size,
+          },
+          {
+            $inc: {
+              "sizes.$.stock": item.quantity,
+              stock: item.quantity,
+            },
+          },
+          { session }
+        );
+      } else {
+        await Product.updateOne(
+          { _id: item.productId },
+          { $inc: { stock: item.quantity } },
+          { session }
+        );
+      }
     }
 
     order.orderStatus = "Cancelled";
@@ -489,13 +873,11 @@ exports.cancelMyOrder = async (req, res) => {
     order.cancelledAt = new Date();
     order.cancelledBy = "user";
 
-    if (order.paymentMethod === "COD") {
-      order.paymentStatus = "Pending";
-    }
-
     order.statusHistory.push({
       status: "Cancelled",
-      note: reason || "Cancelled by user",
+      note: isOnlinePaidOrder
+        ? "Order cancelled by user. Refund initiated."
+        : reason || "Cancelled by user",
       changedAt: new Date(),
     });
 
@@ -506,8 +888,13 @@ exports.cancelMyOrder = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Order cancelled successfully",
-      data: order,
+      message: isOnlinePaidOrder
+        ? "Order cancelled successfully. Refund initiated."
+        : "Order cancelled successfully",
+      data: {
+        order,
+        refund,
+      },
     });
   } catch (error) {
     await session.abortTransaction();

@@ -3,6 +3,22 @@ const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
 const { uploadMultipleImages } = require("../utils/cloudinaryUpload");
 
+const normalizeSizes = (sizes = [], fallbackStock = 0) => {
+  return sizes.map((item) => {
+    if (typeof item === "string") {
+      return {
+        size: item,
+        stock: Number(fallbackStock || 0),
+      };
+    }
+
+    return {
+      size: item.size,
+      stock: Number(item.stock || 0),
+    };
+  });
+};
+
 const uploadFromBuffer = (fileBuffer) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -44,6 +60,7 @@ exports.addProduct = async (req, res) => {
     }
 
     let parsedSizes = [];
+    parsedSizes = normalizeSizes(parsedSizes, stock);
     if (sizes) {
       try {
         parsedSizes = JSON.parse(sizes);
@@ -151,7 +168,11 @@ exports.getAllProducts = async (req, res) => {
     res.status(200).json({
       success: true,
       count: products.length,
-      data: products,
+      //data: products,
+      data: products.map((product) => ({
+        ...product.toObject(),
+        sizes: normalizeSizes(product.sizes, product.stock),
+      })),
     });
   } catch (error) {
     res.status(500).json({
@@ -219,7 +240,11 @@ exports.getProductById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: product,
+      //data: product,
+      data: {
+        ...product.toObject(),
+        sizes: normalizeSizes(product.sizes, product.stock),
+      },
     });
 
   } catch (error) {

@@ -1,71 +1,68 @@
+require("dotenv").config();
+
 const mongoose = require("mongoose");
 const Product = require("./models/Product");
 
-mongoose.connect("mongodb://localhost:27017/zenvyx_Database");
-
-const products = [
-  {
-    "name": "Classic White Cotton Shirt",
-    "description": "Premium white cotton shirt with regular fit for formal and casual wear.",
-    "price": 1299,
-    "category": "Shirt",
-    "stock": 40,
-    "sizes": ["M", "L", "XL"],
-    "image": "dummy-shirt-1.jpg",
-    "cloudinaryId": "dummy_1"
-  },
-  {
-    "name": "Slim Fit Blue Denim Shirt",
-    "description": "Stylish blue denim shirt with slim fit design and full sleeves.",
-    "price": 1499,
-    "category": "Shirt",
-    "stock": 25,
-    "sizes": ["S", "M", "L"],
-    "image": "dummy-shirt-2.jpg",
-    "cloudinaryId": "dummy_2"
-  },
-  {
-    "name": "Black Round Neck T-Shirt",
-    "description": "Soft black round neck t-shirt made with breathable cotton fabric.",
-    "price": 699,
-    "category": "T-Shirt",
-    "stock": 60,
-    "sizes": ["S", "M", "L", "XL"],
-    "image": "dummy-tshirt-1.jpg",
-    "cloudinaryId": "dummy_3"
-  },
-  {
-    "name": "Oversized Graphic T-Shirt",
-    "description": "Trendy oversized t-shirt with front graphic print and soft fabric.",
-    "price": 899,
-    "category": "T-Shirt",
-    "stock": 45,
-    "sizes": ["M", "L", "XL", "XXL"],
-    "image": "dummy-tshirt-2.jpg",
-    "cloudinaryId": "dummy_4"
-  },
-  {
-    "name": "Men's Casual Chinos Pant",
-    "description": "Comfortable casual chinos pant suitable for daily wear and office style.",
-    "price": 1599,
-    "category": "Pant",
-    "stock": 35,
-    "sizes": ["30", "32", "34", "36"],
-    "image": "dummy-pant-1.jpg",
-    "cloudinaryId": "dummy_5"
-  }
-]
-
-const seedData = async () => {
+const migrateSizes = async () => {
   try {
-    await Product.deleteMany();
-    await Product.insertMany(products);
-    console.log("Products inserted");
-    process.exit();
+    if (!process.env.MONGO_URI) {
+      throw new Error("MONGO_URI not found in .env file");
+    }
+
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("MongoDB connected");
+
+    const products = await Product.find({}).lean();
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    for (const product of products) {
+      if (!Array.isArray(product.sizes)) {
+        skippedCount++;
+        continue;
+      }
+
+      if (
+        product.sizes.length > 0 &&
+        typeof product.sizes[0] === "object" &&
+        product.sizes[0].size
+      ) {
+        console.log(`Skipped already migrated: ${product.name}`);
+        skippedCount++;
+        continue;
+      }
+
+      const newSizes = product.sizes.map((size) => ({
+        size: String(size),
+        stock: product.stock || 0,
+      }));
+
+      await Product.updateOne(
+        { _id: product._id },
+        {
+          $set: {
+            sizes: newSizes,
+          },
+        },
+        {
+          runValidators: false,
+        }
+      );
+
+      console.log(`Migrated: ${product.name}`);
+      updatedCount++;
+    }
+
+    console.log("Migration completed");
+    console.log(`Updated products: ${updatedCount}`);
+    console.log(`Skipped products: ${skippedCount}`);
+
+    process.exit(0);
   } catch (error) {
-    console.error(error);
+    console.error("Migration failed:", error.message);
     process.exit(1);
   }
 };
 
-seedData();
+migrateSizes();
