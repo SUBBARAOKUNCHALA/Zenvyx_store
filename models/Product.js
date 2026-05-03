@@ -13,7 +13,7 @@ const productSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    ProductDetails:{
+    ProductDetails: {
       type: String,
       required: true,
       trim: true,
@@ -56,6 +56,19 @@ const productSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+
+    // sizes: [
+    //   {
+    //     size: {
+    //       type: String,
+    //       required: true,
+    //     },
+    //     stock: {
+    //       type: Number,
+    //       default: 0,
+    //     },
+    //   },
+    // ],
 
     image: {
       type: String,

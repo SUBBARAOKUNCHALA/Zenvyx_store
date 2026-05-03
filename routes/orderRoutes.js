@@ -2,7 +2,13 @@ const express = require("express");
 const router = express.Router();
 
 const protect = require("../middleware/authMiddleware");
-// const adminProtect = require("../middleware/adminMiddleware");
+const adminProtect = require("../middleware/AdminProtect");
+
+const {
+  userLimiter,
+  paymentLimiter,
+  adminLimiter,
+} = require("../middleware/rateLimiter");
 
 const {
   getCheckoutSummary,
@@ -12,21 +18,39 @@ const {
   cancelMyOrder,
   getAllOrders,
   updateOrderStatusByAdmin,
-  returnMyOrder
+  returnMyOrder,
 } = require("../controllers/orderController");
 
-router.get("/checkout-summary", protect, getCheckoutSummary);
-router.post("/place", protect, placeOrder);
-router.get("/my-orders", protect, getMyOrders);
-router.get("/:orderId", protect, getOrderById);
-router.put("/:orderId/cancel", protect, cancelMyOrder);
-router.put("/:orderId/return", protect, returnMyOrder);
+// USER ROUTES
 
-// admin
-// router.get("/admin/all", protect, getAllOrders);
-// router.put("/admin/:orderId/status", protect, updateOrderStatusByAdmin);
-// better:
-// router.get("/admin/all", protect, adminProtect, getAllOrders);
-// router.put("/admin/:orderId/status", protect, adminProtect, updateOrderStatusByAdmin);
+router.get("/checkout-summary", protect, userLimiter, getCheckoutSummary);
+
+//  VERY IMPORTANT → protect order placement
+router.post("/place", protect, paymentLimiter, placeOrder);
+
+router.get("/my-orders", protect, userLimiter, getMyOrders);
+router.get("/:orderId", protect, userLimiter, getOrderById);
+
+router.put("/:orderId/cancel", protect, userLimiter, cancelMyOrder);
+router.put("/:orderId/return", protect, userLimiter, returnMyOrder);
+
+
+//  ADMIN ROUTES
+
+router.get(
+  "/admin/all",
+  protect,
+  adminProtect,
+  adminLimiter,
+  getAllOrders
+);
+
+router.put(
+  "/admin/:orderId/status",
+  protect,
+  adminProtect,
+  adminLimiter,
+  updateOrderStatusByAdmin
+);
 
 module.exports = router;
