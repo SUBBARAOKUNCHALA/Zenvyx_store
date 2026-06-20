@@ -6,12 +6,19 @@ const Product = require("../models/Product");
 exports.addToCart = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { productId, quantity,size } = req.body;
+    const { productId, quantity, size } = req.body;
 
     if (!productId) {
       return res.status(400).json({
         success: false,
         message: "Product ID is required",
+      });
+    }
+
+    if (!size) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a size",
       });
     }
 
@@ -24,26 +31,72 @@ exports.addToCart = async (req, res) => {
 
     const qty = quantity && quantity > 0 ? Number(quantity) : 1;
 
-    const productExists = await Product.findById(productId);
-    if (!productExists) {
+    const product = await Product.findById(productId);
+
+    if (!product) {
       return res.status(404).json({
         success: false,
         message: "Product not found",
       });
     }
 
-    const existingCartItem = await Cart.findOne({ userId, productId });
+    // Find selected size stock
+    const selectedSize = product.sizes.find(
+      (s) =>
+        String(s.size).toUpperCase() ===
+        String(size).toUpperCase()
+    );
+
+    if (!selectedSize) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected size not available",
+      });
+    }
+
+    if (selectedSize.stock <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected size out of stock",
+      });
+    }
+
+    // Product + Size should be unique
+    const existingCartItem = await Cart.findOne({
+      userId,
+      productId,
+      size,
+    });
 
     if (existingCartItem) {
-      existingCartItem.quantity += qty;
+      const newQty = existingCartItem.quantity + qty;
+
+      if (newQty > selectedSize.stock) {
+        return res.status(400).json({
+          success: false,
+          message: `Only ${selectedSize.stock} items available for size ${size}`,
+        });
+      }
+
+      existingCartItem.quantity = newQty;
+
       await existingCartItem.save();
 
-      const updatedItem = await Cart.findById(existingCartItem._id).populate("productId");
+      const updatedItem = await Cart.findById(
+        existingCartItem._id
+      ).populate("productId");
 
       return res.status(200).json({
         success: true,
-        message: "Cart item quantity updated",
+        message: "Cart quantity updated",
         data: updatedItem,
+      });
+    }
+
+    if (qty > selectedSize.stock) {
+      return res.status(400).json({
+        success: false,
+        message: `Only ${selectedSize.stock} items available for size ${size}`,
       });
     }
 
@@ -51,18 +104,22 @@ exports.addToCart = async (req, res) => {
       userId,
       productId,
       quantity: qty,
-      size:size
+      size,
     });
 
-    const populatedCartItem = await Cart.findById(cartItem._id).populate("productId");
+    const populatedCartItem = await Cart.findById(
+      cartItem._id
+    ).populate("productId");
 
     return res.status(201).json({
       success: true,
       message: "Item added to cart successfully",
       data: populatedCartItem,
     });
+
   } catch (error) {
     console.error("addToCart error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Failed to add item to cart",

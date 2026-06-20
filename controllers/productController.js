@@ -37,6 +37,48 @@ const uploadFromBuffer = (fileBuffer) => {
 
 // @desc Add product
 // @route POST /api/products
+
+
+const SHIRT_SIZE_CHART = {
+  S: { chest: "36-38", shoulder: "17", length: "27" },
+  M: { chest: "38-40", shoulder: "18", length: "28" },
+  L: { chest: "40-42", shoulder: "19", length: "29" },
+  XL: { chest: "42-44", shoulder: "20", length: "30" },
+  XXL: { chest: "44-46", shoulder: "21", length: "31" },
+};
+
+const TSHIRT_SIZE_CHART = {
+  S: { chest: "36-38", length: "26-27" },
+  M: { chest: "38-40", length: "27-28" },
+  L: { chest: "40-42", length: "28-29" },
+  XL: { chest: "42-44", length: "29-30" },
+  XXL: { chest: "44-46", length: "30-31" },
+};
+
+const PANT_SIZE_CHART = {
+  28: { waist: "28", length: "40-41" },
+  30: { waist: "30", length: "40-41" },
+  32: { waist: "32", length: "41-42" },
+  34: { waist: "34", length: "41-42" },
+  36: { waist: "36", length: "42-43" },
+  38: { waist: "38", length: "42-43" },
+};
+
+const getMeasurements = (category, size) => {
+  if (category === "Shirt") {
+    return SHIRT_SIZE_CHART[size] || {};
+  }
+
+  if (category === "T-Shirt") {
+    return TSHIRT_SIZE_CHART[size] || {};
+  }
+
+  if (category === "Pant") {
+    return PANT_SIZE_CHART[size] || {};
+  }
+
+  return {};
+};
 exports.addProduct = async (req, res) => {
   try {
     const {
@@ -52,36 +94,64 @@ exports.addProduct = async (req, res) => {
       tags,
     } = req.body;
 
-    if (!name || !description || !price || !category || !ProductDetails) {
+    if (
+      !name ||
+      !description ||
+      !ProductDetails ||
+      !price ||
+      !category
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Name, description,ProductDetails, price, and category are required",
+        message:
+          "Name, Description, ProductDetails, Price and Category are required",
       });
     }
 
     let parsedSizes = [];
-    parsedSizes = normalizeSizes(parsedSizes, stock);
+
     if (sizes) {
       try {
         parsedSizes = JSON.parse(sizes);
+
         if (!Array.isArray(parsedSizes)) {
           return res.status(400).json({
             success: false,
             message: "Sizes must be an array",
           });
         }
+
+        parsedSizes = parsedSizes.map((item) => {
+          const sizeValue =
+            typeof item === "string"
+              ? item
+              : String(item.size).trim();
+
+          return {
+            size: sizeValue,
+            stock: Number(item.stock || stock || 0),
+
+            measurements: getMeasurements(
+              category,
+              sizeValue
+            ),
+          };
+        });
       } catch (error) {
         return res.status(400).json({
           success: false,
-          message: 'Sizes must be valid JSON array. Example: ["S","M","L"]',
+          message:
+            'Sizes must be valid JSON. Example: [{"size":"S","stock":10}]',
         });
       }
     }
 
     let parsedTags = [];
+
     if (tags) {
       try {
         parsedTags = JSON.parse(tags);
+
         if (!Array.isArray(parsedTags)) {
           return res.status(400).json({
             success: false,
@@ -112,7 +182,10 @@ exports.addProduct = async (req, res) => {
       });
     }
 
-    const uploadedImages = await uploadMultipleImages(files, "products");
+    const uploadedImages = await uploadMultipleImages(
+      files,
+      "products"
+    );
 
     const createdBy =
       req.user?.userId ||
@@ -133,16 +206,22 @@ exports.addProduct = async (req, res) => {
       name: name.trim(),
       description: description.trim(),
       ProductDetails: ProductDetails.trim(),
+
       price: Number(price),
       category,
       subCategory,
+
       stock: Number(stock || 0),
       discount: Number(discount || 0),
+
       sizes: parsedSizes,
+
       tags: parsedTags,
+
       image: uploadedImages[0] || "",
       images: uploadedImages,
-      createdBy: createdBy,
+
+      createdBy,
     });
 
     return res.status(201).json({
@@ -150,8 +229,10 @@ exports.addProduct = async (req, res) => {
       message: "Product added successfully",
       data: product,
     });
+
   } catch (error) {
     console.error("addProduct error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Failed to add product",

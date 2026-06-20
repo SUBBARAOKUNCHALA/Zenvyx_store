@@ -51,24 +51,40 @@ const productSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
-    // sizes: {
-    //   type: [String],
-    //   default: [],
-    // },
-
     sizes: [
       {
         size: {
           type: String,
           required: true,
         },
+
         stock: {
           type: Number,
           default: 0,
         },
+
+        measurements: {
+          chest: String,
+          shoulder: String,
+          waist: String,
+          length: String,
+        },
       },
     ],
+
+
+    // sizes: [
+    //   {
+    //     size: {
+    //       type: String,
+    //       required: true,
+    //     },
+    //     stock: {
+    //       type: Number,
+    //       default: 0,
+    //     },
+    //   },
+    // ],
 
     image: {
       type: String,
