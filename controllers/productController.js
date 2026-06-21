@@ -375,3 +375,60 @@ exports.getSimilarProducts = async (req, res) => {
     });
   }
 };
+
+// @desc Delete Product
+// @route DELETE /api/products/:productId
+// @access Admin
+
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    if (!productId) {
+      return res.status(400).json({
+        success: false,
+        message: "Product ID is required",
+      });
+    }
+
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    // Delete images from Cloudinary
+    if (product.images?.length > 0) {
+      for (const imageUrl of product.images) {
+        try {
+          const parts = imageUrl.split("/");
+          const fileName = parts[parts.length - 1];
+          const publicId = `products/${fileName.split(".")[0]}`;
+
+          await cloudinary.uploader.destroy(publicId);
+        } catch (err) {
+          console.log("Cloudinary delete error:", err.message);
+        }
+      }
+    }
+
+    await Product.findByIdAndDelete(productId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Product deleted successfully",
+    });
+
+  } catch (error) {
+    console.error("deleteProduct error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete product",
+      error: error.message,
+    });
+  }
+};

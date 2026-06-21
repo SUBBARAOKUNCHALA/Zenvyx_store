@@ -23,6 +23,10 @@ const {
   adminLimiter,
 } = require("../middleware/rateLimiter");
 
+
+
+const {deleteProduct}=require("../controllers/productController")
+
 // Admin login - strict limiter
 router.post("/login", authLimiter, adminLogin);
 
@@ -47,6 +51,13 @@ router.put(
   adminProtect,
   adminLimiter,
   updateReturnStatusByAdmin
+);
+
+router.delete(
+  "/:productId",
+  adminProtect,
+  adminLimiter,
+  deleteProduct
 );
 
 module.exports = router;
