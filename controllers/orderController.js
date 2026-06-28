@@ -5,6 +5,7 @@ const Order = require("../models/Order");
 const Product = require("../models/Product");
 const razorpay = require("../config/razorpay");
 const ReturnOrder = require("../models/ReturnOrder")
+const generateInvoice = require("../utils/invoiceGenerator");
 const ALLOWED_PAYMENT_METHODS = ["COD", "RAZORPAY", "UPI", "NET_BANKING"];
 const USER_CANCELLABLE_STATUSES = ["Placed", "Confirmed"];
 const ADMIN_UPDATABLE_STATUSES = [
@@ -763,151 +764,6 @@ exports.getOrderById = async (req, res) => {
   }
 };
 
-exports.cancelMyOrder = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const userId = req.user.userId || req.user.id;
-    const { orderId } = req.params;
-    const { reason } = req.body;
-
-    if (!validateObjectId(orderId)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid order id",
-      });
-    }
-
-    const order = await Order.findOne({ _id: orderId, userId }).session(session);
-
-    if (!order) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
-    }
-
-    if (!USER_CANCELLABLE_STATUSES.includes(order.orderStatus)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `Order cannot be cancelled once it is ${order.orderStatus}`,
-      });
-    }
-
-    const isOnlinePaidOrder =
-      ["UPI", "NET_BANKING", "RAZORPAY"].includes(order.paymentMethod) &&
-      order.paymentStatus === "Paid" &&
-      order.razorpayPaymentId;
-
-    let refund = null;
-
-    if (isOnlinePaidOrder) {
-      const refundAmountInPaise = Math.round(Number(order.finalAmount || 0) * 100);
-
-      refund = await razorpay.payments.refund(order.razorpayPaymentId, {
-        amount: refundAmountInPaise,
-        speed: "optimum",
-        notes: {
-          orderId: order._id.toString(),
-          orderNumber: order.orderNumber,
-          reason: reason || "Cancelled by user",
-        },
-      });
-
-      if (order.refundId) {
-        return res.status(400).json({
-          success: false,
-          message: "Refund already initiated",
-        });
-      }
-
-      order.paymentStatus =
-        refund.status === "processed" ? "Refunded" : "Refund_Pending";
-
-      order.refundId = refund.id;
-      order.refundStatus = refund.status || "created";
-      order.refundAmount = refund.amount ? refund.amount / 100 : order.finalAmount;
-
-      if (refund.status === "processed") {
-        order.refundedAt = new Date();
-      }
-    }
-
-    if (order.paymentMethod === "COD") {
-      order.paymentStatus = "COD_Pending";
-    }
-
-    for (const item of order.items) {
-      if (item.size) {
-        await Product.updateOne(
-          {
-            _id: item.productId,
-            "sizes.size": item.size,
-          },
-          {
-            $inc: {
-              "sizes.$.stock": item.quantity,
-              stock: item.quantity,
-            },
-          },
-          { session }
-        );
-      } else {
-        await Product.updateOne(
-          { _id: item.productId },
-          { $inc: { stock: item.quantity } },
-          { session }
-        );
-      }
-    }
-
-    order.orderStatus = "Cancelled";
-    order.cancelReason = reason || "Cancelled by user";
-    order.cancelledAt = new Date();
-    order.cancelledBy = "user";
-
-    order.statusHistory.push({
-      status: "Cancelled",
-      note: isOnlinePaidOrder
-        ? "Order cancelled by user. Refund initiated."
-        : reason || "Cancelled by user",
-      changedAt: new Date(),
-    });
-
-    await order.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return res.status(200).json({
-      success: true,
-      message: isOnlinePaidOrder
-        ? "Order cancelled successfully. Refund initiated."
-        : "Order cancelled successfully",
-      data: {
-        order,
-        refund,
-      },
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error("cancelMyOrder error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to cancel order",
-      error: error.message,
-    });
-  }
-};
 
 exports.getAllOrders = async (req, res) => {
   try {
@@ -1073,6 +929,152 @@ exports.updateOrderStatusByAdmin = async (req, res) => {
   }
 };
 
+exports.cancelMyOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const userId = req.user.userId || req.user.id;
+    const { orderId } = req.params;
+    const { reason } = req.body;
+
+    if (!validateObjectId(orderId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order id",
+      });
+    }
+
+    const order = await Order.findOne({ _id: orderId, userId }).session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (!USER_CANCELLABLE_STATUSES.includes(order.orderStatus)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Order cannot be cancelled once it is ${order.orderStatus}`,
+      });
+    }
+
+    const isOnlinePaidOrder =
+      ["UPI", "NET_BANKING", "RAZORPAY"].includes(order.paymentMethod) &&
+      order.paymentStatus === "Paid" &&
+      order.razorpayPaymentId;
+
+    let refund = null;
+
+    if (isOnlinePaidOrder) {
+      const refundAmountInPaise = Math.round(Number(order.finalAmount || 0) * 100);
+
+      refund = await razorpay.payments.refund(order.razorpayPaymentId, {
+        amount: refundAmountInPaise,
+        speed: "optimum",
+        notes: {
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          reason: reason || "Cancelled by user",
+        },
+      });
+
+      if (order.refundId) {
+        return res.status(400).json({
+          success: false,
+          message: "Refund already initiated",
+        });
+      }
+
+      order.paymentStatus =
+        refund.status === "processed" ? "Refunded" : "Refund_Pending";
+
+      order.refundId = refund.id;
+      order.refundStatus = refund.status || "created";
+      order.refundAmount = refund.amount ? refund.amount / 100 : order.finalAmount;
+
+      if (refund.status === "processed") {
+        order.refundedAt = new Date();
+      }
+    }
+
+    if (order.paymentMethod === "COD") {
+      order.paymentStatus = "COD_Pending";
+    }
+
+    for (const item of order.items) {
+      if (item.size) {
+        await Product.updateOne(
+          {
+            _id: item.productId,
+            "sizes.size": item.size,
+          },
+          {
+            $inc: {
+              "sizes.$.stock": item.quantity,
+              stock: item.quantity,
+            },
+          },
+          { session }
+        );
+      } else {
+        await Product.updateOne(
+          { _id: item.productId },
+          { $inc: { stock: item.quantity } },
+          { session }
+        );
+      }
+    }
+
+    order.orderStatus = "Cancelled";
+    order.cancelReason = reason || "Cancelled by user";
+    order.cancelledAt = new Date();
+    order.cancelledBy = "user";
+
+    order.statusHistory.push({
+      status: "Cancelled",
+      note: isOnlinePaidOrder
+        ? "Order cancelled by user. Refund initiated."
+        : reason || "Cancelled by user",
+      changedAt: new Date(),
+    });
+
+    await order.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: isOnlinePaidOrder
+        ? "Order cancelled successfully. Refund initiated."
+        : "Order cancelled successfully",
+      data: {
+        order,
+        refund,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("cancelMyOrder error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to cancel order",
+      error: error.message,
+    });
+  }
+};
+
 exports.returnMyOrder = async (req, res) => {
   try {
     const userId = req.user.userId || req.user.id;
@@ -1106,6 +1108,20 @@ exports.returnMyOrder = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Only delivered orders can be returned",
+      });
+    }
+
+    const deliveryDate = new Date(order.deliveredAt);
+    const currentDate = new Date();
+
+    const diffInDays = Math.floor(
+      (currentDate - deliveryDate) / (1000 * 60 * 60 * 24)
+    );
+
+    if (diffInDays > 7) {
+      return res.status(400).json({
+        success: false,
+        message: "Return window has expired. Returns are allowed only within 7 days after delivery.",
       });
     }
 
@@ -1323,7 +1339,7 @@ exports.updateReturnStatusByAdmin = async (req, res) => {
       note:
         adminNote ||
         `Return status changed from ${currentStatus} to ${returnStatus}`,
-      changedAt: historyDate,
+      changedAt: new Date(),
     });
 
     order.statusHistory.push({
@@ -1331,7 +1347,7 @@ exports.updateReturnStatusByAdmin = async (req, res) => {
       note:
         adminNote ||
         `Return status changed from ${currentStatus} to ${returnStatus}`,
-      changedAt: historyDate,
+      changedAt: new Date(),
     });
 
     await returnOrder.save();
@@ -1349,5 +1365,58 @@ exports.updateReturnStatusByAdmin = async (req, res) => {
       message: "Failed to update return status",
       error: error.message,
     });
+  }
+};
+
+
+exports.downloadInvoice = async (req, res) => {
+  try {
+
+    const order = await Order.findById(req.params.orderId)
+      .populate("userId")
+      .populate("items.productId");
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    if (order.userId._id.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    if (order.orderStatus !== "Delivered") {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice can be downloaded only after delivery."
+      });
+    }
+
+    res.setHeader(
+      "Content-Type",
+      "application/pdf"
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=Invoice-${order.orderNumber}.pdf`
+    );
+
+    generateInvoice(order, res);
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
   }
 };

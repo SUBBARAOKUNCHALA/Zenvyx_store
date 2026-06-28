@@ -14,6 +14,7 @@ const {
   getCheckoutSummary,
   placeOrder,
   getMyOrders,
+  downloadInvoice,
   getOrderById,
   cancelMyOrder,
   getAllOrders,
@@ -33,6 +34,12 @@ router.get("/:orderId", protect, userLimiter, getOrderById);
 
 router.put("/:orderId/cancel", protect, userLimiter, cancelMyOrder);
 router.put("/:orderId/return", protect, userLimiter, returnMyOrder);
+router.get(
+  "/:orderId/invoice",
+  protect,
+  userLimiter,
+  downloadInvoice
+);
 
 
 //  ADMIN ROUTES

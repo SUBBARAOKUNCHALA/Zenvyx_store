@@ -23,6 +23,7 @@ const protect = (req, res, next) => {
     token = token.split(" ")[1];
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("middle where ",decoded);
 
     req.user = decoded;
 
