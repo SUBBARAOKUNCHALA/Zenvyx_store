@@ -2,3 +2,7 @@
 //node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   
 // jwt to creation run this line
 //must create admin mail password and place that password and email in .env folder
+
+
+// this is admin secrate key
+//node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
