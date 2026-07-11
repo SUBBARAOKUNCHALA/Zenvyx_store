@@ -7,86 +7,100 @@ exports.createRazorpayOrder = async (req, res) => {
     if (!amount || Number(amount) <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Valid amount is required",
+        message: "Invalid amount",
       });
     }
 
-    const amountInPaise = Math.round(Number(amount) * 100);
-
     const options = {
-      amount: amountInPaise,
+      amount: Math.round(Number(amount) * 100),
       currency: "INR",
-      receipt: `receipt_${Date.now()}`,
+      receipt: `ZENVYX_${Date.now()}`,
+      payment_capture: 1,
+      notes: {
+        source: "zenvyx-store",
+      },
     };
 
     const order = await razorpay.orders.create(options);
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
-      message: "Razorpay order created successfully",
-      data: {
-        id: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        receipt: order.receipt,
-        status: order.status,
-      },
+      message: "Razorpay order created",
+      data: order,
     });
-  } catch (error) {
-    console.error("Create Razorpay order error:", error);
+  } catch (err) {
+    console.log("Create Razorpay Order Error :", err);
+
     return res.status(500).json({
       success: false,
-      message: "Failed to create Razorpay order",
-      error: error.message,
+      message: "Unable to create Razorpay order",
+      error: err.message,
     });
   }
 };
-
 exports.verifyRazorpayPayment = async (req, res) => {
   try {
+
     const {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
     } = req.body;
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    if (
+      !razorpay_order_id ||
+      !razorpay_payment_id ||
+      !razorpay_signature
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Payment verification fields are required",
+        message: "Missing payment details",
       });
     }
 
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
-
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(body.toString())
+    const generatedSignature = crypto
+      .createHmac(
+        "sha256",
+        process.env.RAZORPAY_KEY_SECRET
+      )
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    const isValid = expectedSignature === razorpay_signature;
-
-    if (!isValid) {
+    if (generatedSignature !== razorpay_signature) {
       return res.status(400).json({
         success: false,
-        message: "Invalid payment signature",
+        message: "Payment verification failed",
+      });
+    }
+
+    // Fetch payment details directly from Razorpay
+
+    const payment = await razorpay.payments.fetch(
+      razorpay_payment_id
+    );
+
+    if (payment.status !== "captured") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment not captured",
       });
     }
 
     return res.status(200).json({
       success: true,
       message: "Payment verified successfully",
-      data: {
-        razorpay_order_id,
-        razorpay_payment_id,
-      },
+      payment,
     });
-  } catch (error) {
-    console.error("Verify Razorpay payment error:", error);
+
+  } catch (err) {
+
+    console.log("Verify Payment Error :", err);
+
     return res.status(500).json({
       success: false,
       message: "Payment verification failed",
-      error: error.message,
+      error: err.message,
     });
+
   }
 };

@@ -29,10 +29,12 @@ const generateOrderNumber = () => {
   return `ZENVYX-${yyyy}${mm}${dd}-${random}`;
 };
 
+// const calculateDeliveryCharge = (subtotalAmount) => {
+//   return subtotalAmount >= 999 ? 50 : 99;
+// };
 const calculateDeliveryCharge = (subtotalAmount) => {
-  return subtotalAmount >= 999 ? 50 : 99;
+  return subtotalAmount >= 999 ? 0 : 0;
 };
-
 const getPaymentStatusFromMethod = (paymentMethod) => {
   if (paymentMethod === "COD") return "COD_Pending";
   return "Pending";
