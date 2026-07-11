@@ -353,7 +353,7 @@ exports.placeOrder = async (req, res) => {
       orderNumber = generateOrderNumber();
       exists = await Order.findOne({ orderNumber }).session(session);
     }
-
+    console.log("Creating order...");
     const order = await Order.create(
       [
         {
@@ -400,7 +400,8 @@ exports.placeOrder = async (req, res) => {
       ],
       { session }
     );
-
+    console.log("Order created successfully");
+    console.log("Updating stock...");
     // ✅ Reduce stock after successful order creation
     for (const itemData of orderSourceItems) {
       const quantity = Number(itemData.quantity || 1);
@@ -436,7 +437,7 @@ exports.placeOrder = async (req, res) => {
         );
       }
     }
-
+    console.log("Stock updated");
     if (mode !== "buyNow") {
       await Cart.deleteMany({ userId }).session(session);
     }
@@ -454,6 +455,11 @@ exports.placeOrder = async (req, res) => {
     session.endSession();
 
     console.error("placeOrder error:", error);
+    console.error("=========================");
+console.error("PLACE ORDER ERROR");
+console.error(error);
+console.error(error.stack);
+console.error("=========================");
     return res.status(500).json({
       success: false,
       message: "Failed to place order",
