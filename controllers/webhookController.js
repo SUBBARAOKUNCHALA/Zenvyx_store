@@ -17,6 +17,8 @@ const verifySignature = (rawBody, signature) => {
 exports.handleRazorpayWebhook = async (req, res) => {
   try {
     const signature = req.headers["x-razorpay-signature"];
+    console.log("DEBUG headers:", req.headers);
+    console.log("DEBUG rawBody present:", !!req.rawBody, "type:", typeof req.rawBody);
 
     if (!signature || !req.rawBody) {
       console.error("Webhook missing signature or rawBody");
