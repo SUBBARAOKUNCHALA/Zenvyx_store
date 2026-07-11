@@ -6,3 +6,5 @@
 
 // this is admin secrate key
 //node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+
+//web hook for payment gate way node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" it will retuen secret key 

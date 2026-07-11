@@ -16,7 +16,7 @@ const orderRoutes = require("./routes/orderRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const whishListRoutes=require("./routes/mishListRoutes")
-
+const webhookRoutes = require("./routes/webhookRoutes");
 //connectDB();
 
 const app = express();
@@ -47,6 +47,7 @@ app.use("/api/address", addressRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/wishlist",whishListRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/webhooks", webhookRoutes);
 app.use("/api/payment", paymentRoutes);
 
 app.get("/", (req, res) => {
