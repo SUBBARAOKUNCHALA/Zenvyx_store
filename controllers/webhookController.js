@@ -18,38 +18,45 @@ exports.handleRazorpayWebhook = async (req, res) => {
   try {
     const signature = req.headers["x-razorpay-signature"];
 
-    // req.rawBody must be the untouched buffer/string - set up in app.js (step 3)
-    if (!signature || !verifySignature(req.rawBody, signature)) {
+    if (!signature || !req.rawBody) {
+      console.error("Webhook missing signature or rawBody");
+      return res.status(400).json({ success: false, message: "Invalid request" });
+    }
+
+    const expected = crypto
+      .createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET)
+      .update(req.rawBody)
+      .digest("hex");
+
+    const isValid =
+      expected.length === signature.length &&
+      crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+
+    if (!isValid) {
       console.error("Webhook signature mismatch");
       return res.status(400).json({ success: false, message: "Invalid signature" });
     }
 
-    const event = req.body.event;
+    const event = req.body.event; // req.body is already parsed JSON here
     console.log("Razorpay webhook received:", event);
 
     switch (event) {
       case "payment.captured":
         await handlePaymentCaptured(req.body.payload.payment.entity);
         break;
-
       case "payment.failed":
         await handlePaymentFailed(req.body.payload.payment.entity);
         break;
-
       case "refund.processed":
         await handleRefundProcessed(req.body.payload.refund.entity);
         break;
-
       default:
         console.log("Unhandled webhook event:", event);
     }
 
-    // Always 200 once verified, or Razorpay will keep retrying the same event
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error("Webhook processing error:", error);
-    // Still return 200 so Razorpay doesn't hammer retries for a bug on our side
-    // (log it and fix it, don't let it become a retry storm)
     return res.status(200).json({ success: false, message: "Processed with error" });
   }
 };
