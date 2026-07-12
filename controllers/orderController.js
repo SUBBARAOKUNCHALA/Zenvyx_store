@@ -456,10 +456,10 @@ exports.placeOrder = async (req, res) => {
 
     console.error("placeOrder error:", error);
     console.error("=========================");
-console.error("PLACE ORDER ERROR");
-console.error(error);
-console.error(error.stack);
-console.error("=========================");
+    console.error("PLACE ORDER ERROR");
+    console.error(error);
+    console.error(error.stack);
+    console.error("=========================");
     return res.status(500).json({
       success: false,
       message: "Failed to place order",
@@ -956,7 +956,7 @@ exports.cancelMyOrder = async (req, res) => {
     }
 
     const order = await Order.findOne({ _id: orderId, userId }).session(session);
-    console.log("Cancel Order item",order)
+    console.log("Cancel Order item", order)
 
     if (!order) {
       await session.abortTransaction();
@@ -983,8 +983,100 @@ exports.cancelMyOrder = async (req, res) => {
 
     let refund = null;
 
+    // if (isOnlinePaidOrder) {
+    //   if (order.refundId) {
+    //     return res.status(400).json({
+    //       success: false,
+    //       message: "Refund already initiated",
+    //     });
+    //   }
+    //   // const refundAmountInPaise = Math.round(Number(order.finalAmount || 0) * 100);
+
+    //   // refund = await razorpay.payments.refund(order.razorpayPaymentId, {
+    //   //   amount: refundAmountInPaise,
+    //   //   speed: "optimum",
+    //   //   notes: {
+    //   //     orderId: order._id.toString(),
+    //   //     orderNumber: order.orderNumber,
+    //   //     reason: reason || "Cancelled by user",
+    //   //   },
+    //   // });
+    //   const payment = await razorpay.payments.fetch(order.razorpayPaymentId);
+    //   const capturedAmountInPaise = payment.amount; // Razorpay's own paise value
+
+    //   const requestedRefundInPaise = Math.round(Number(order.finalAmount || 0) * 100);
+
+    //   const refundAmountInPaise = Math.min(
+    //     requestedRefundInPaise,
+    //     capturedAmountInPaise
+    //   );
+
+    //   if (refundAmountInPaise <= 0) {
+    //     await session.abortTransaction();
+    //     session.endSession();
+    //     return res.status(400).json({
+    //       success: false,
+    //       message: "No valid captured amount available to refund",
+    //     });
+    //   }
+
+    //   refund = await razorpay.payments.refund(order.razorpayPaymentId, {
+    //     amount: refundAmountInPaise,
+    //     speed: "optimum",
+    //     notes: {
+    //       orderId: order._id.toString(),
+    //       orderNumber: order.orderNumber,
+    //       reason: reason || "Cancelled by user",
+    //     },
+    //   });
+
+    //   // if (order.refundId) {
+    //   //   return res.status(400).json({
+    //   //     success: false,
+    //   //     message: "Refund already initiated",
+    //   //   });
+    //   // }
+
+    //   order.paymentStatus =
+    //     refund.status === "processed" ? "Refunded" : "Refund_Pending";
+
+    //   order.refundId = refund.id;
+    //   order.refundStatus = refund.status || "created";
+    //   order.refundAmount = refund.amount ? refund.amount / 100 : order.finalAmount;
+
+    //   if (refund.status === "processed") {
+    //     order.refundedAt = new Date();
+    //   }
+    // }
+
     if (isOnlinePaidOrder) {
-      const refundAmountInPaise = Math.round(Number(order.finalAmount || 0) * 100);
+      if (order.refundId) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Refund already initiated",
+        });
+      }
+
+      const payment = await razorpay.payments.fetch(order.razorpayPaymentId);
+      const capturedAmountInPaise = payment.amount;
+
+      const requestedRefundInPaise = Math.round(Number(order.finalAmount || 0) * 100);
+
+      const refundAmountInPaise = Math.min(
+        requestedRefundInPaise,
+        capturedAmountInPaise
+      );
+
+      if (refundAmountInPaise <= 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "No valid captured amount available to refund",
+        });
+      }
 
       refund = await razorpay.payments.refund(order.razorpayPaymentId, {
         amount: refundAmountInPaise,
@@ -995,13 +1087,6 @@ exports.cancelMyOrder = async (req, res) => {
           reason: reason || "Cancelled by user",
         },
       });
-
-      if (order.refundId) {
-        return res.status(400).json({
-          success: false,
-          message: "Refund already initiated",
-        });
-      }
 
       order.paymentStatus =
         refund.status === "processed" ? "Refunded" : "Refund_Pending";
