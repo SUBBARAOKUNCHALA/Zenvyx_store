@@ -33,7 +33,7 @@ const generateOrderNumber = () => {
 //   return subtotalAmount >= 999 ? 50 : 99;
 // };
 const calculateDeliveryCharge = (subtotalAmount) => {
-  return subtotalAmount >= 999 ? 0 : 0;
+  return subtotalAmount >= 999 ? 10 : 5;
 };
 const getPaymentStatusFromMethod = (paymentMethod) => {
   if (paymentMethod === "COD") return "COD_Pending";
@@ -956,6 +956,7 @@ exports.cancelMyOrder = async (req, res) => {
     }
 
     const order = await Order.findOne({ _id: orderId, userId }).session(session);
+    console.log("Cancel Order item",order)
 
     if (!order) {
       await session.abortTransaction();
