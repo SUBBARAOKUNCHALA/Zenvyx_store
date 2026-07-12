@@ -1,11 +1,12 @@
 const path = require("path");
 const dotenv = require("dotenv");
+const cron = require("node-cron");
 dotenv.config({ path: path.resolve(__dirname, ".env") });
 
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
-
+const reconcilePendingRefunds = require("./jobs/reconcileRefunds");
 const { globalLimiter } = require("./middleware/rateLimiter");
 
 const authRoutes = require("./routes/authRoutes");
@@ -69,6 +70,14 @@ const startServer = async () => {
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      cron.schedule("*/10 * * * *", () => {
+        reconcilePendingRefunds().catch((err) =>
+          console.error("Reconciliation job crashed:", err)
+        );
+      });
+      reconcilePendingRefunds().catch((err) =>
+        console.error("Initial reconciliation run failed:", err)
+      );
     });
   } catch (err) {
     console.error(err);
