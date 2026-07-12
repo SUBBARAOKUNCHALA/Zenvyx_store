@@ -28,6 +28,10 @@ const productSchema = new mongoose.Schema(
       enum: ["Shirt", "T-Shirt", "Pant"],
       required: true,
     },
+     isDeleted: {
+      type: Boolean,
+      default: false,
+    },
 
     subCategory: {
       type: String,

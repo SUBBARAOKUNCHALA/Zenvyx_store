@@ -244,12 +244,11 @@ exports.addProduct = async (req, res) => {
 // @route GET /api/products
 exports.getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find().sort({ createdAt: -1 });
+    const products = await Product.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
       count: products.length,
-      //data: products,
       data: products.map((product) => ({
         ...product.toObject(),
         sizes: normalizeSizes(product.sizes, product.stock),
@@ -262,6 +261,7 @@ exports.getAllProducts = async (req, res) => {
     });
   }
 };
+
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -270,6 +270,13 @@ exports.updateProduct = async (req, res) => {
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    if (product.isDeleted) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot edit a deleted product. Restore it first.",
+      });
     }
 
     let images = product.images;
@@ -310,7 +317,10 @@ exports.getProductById = async (req, res) => {
   try {
     const { productId } = req.params;
 
-    const product = await Product.findById(productId);
+    const product = await Product.findOne({
+      _id: productId,
+      isDeleted: { $ne: true },
+    });
 
     if (!product) {
       return res.status(404).json({
@@ -321,7 +331,6 @@ exports.getProductById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      //data: product,
       data: {
         ...product.toObject(),
         sizes: normalizeSizes(product.sizes, product.stock),
@@ -342,7 +351,6 @@ exports.getSimilarProducts = async (req, res) => {
   try {
     const { productId } = req.params;
 
-    // Step 1: find current product
     const product = await Product.findById(productId);
 
     if (!product) {
@@ -352,13 +360,13 @@ exports.getSimilarProducts = async (req, res) => {
       });
     }
 
-    // Step 2: find similar products
     const similarProducts = await Product.find({
-      _id: { $ne: product._id }, // exclude current product
-      category: product.category, // same category
+      _id: { $ne: product._id },
+      category: product.category,
+      isDeleted: { $ne: true },
     })
-      .sort({ createdAt: -1 }) // latest first
-      .limit(8); // limit results
+      .sort({ createdAt: -1 })
+      .limit(8);
 
     res.status(200).json({
       success: true,
@@ -400,26 +408,36 @@ exports.deleteProduct = async (req, res) => {
       });
     }
 
-    // Delete images from Cloudinary
-    if (product.images?.length > 0) {
-      for (const imageUrl of product.images) {
-        try {
-          const parts = imageUrl.split("/");
-          const fileName = parts[parts.length - 1];
-          const publicId = `products/${fileName.split(".")[0]}`;
-
-          await cloudinary.uploader.destroy(publicId);
-        } catch (err) {
-          console.log("Cloudinary delete error:", err.message);
-        }
-      }
+    if (product.isDeleted) {
+      return res.status(400).json({
+        success: false,
+        message: "Product is already deleted",
+      });
     }
 
-    await Product.findByIdAndDelete(productId);
+    // Soft delete only — never touch Cloudinary images or remove the
+    // document. Past orders reference this product's snapshot data
+    // (name/image/price already copied at order time), and admin order
+    // history sometimes still populates productId directly, so the
+    // underlying document and its images must stay intact forever.
+    //
+    // Using findByIdAndUpdate instead of .save() here deliberately —
+    // .save() re-validates the ENTIRE document against the schema,
+    // and some older products in the DB predate required fields like
+    // ProductDetails, so a full-document save on them fails even though
+    // we're only touching isDeleted/deletedAt.
+    await Product.findByIdAndUpdate(
+      productId,
+      {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+      { runValidators: false }
+    );
 
     return res.status(200).json({
       success: true,
-      message: "Product deleted successfully",
+      message: "Product removed from store successfully",
     });
 
   } catch (error) {
@@ -428,6 +446,50 @@ exports.deleteProduct = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to delete product",
+      error: error.message,
+    });
+  }
+};
+
+
+// feature method for get deleted product to live 
+exports.restoreProduct = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    if (!product.isDeleted) {
+      return res.status(400).json({
+        success: false,
+        message: "Product is not deleted",
+      });
+    }
+
+    product.isDeleted = false;
+    product.deletedAt = null;
+
+    await product.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Product restored successfully",
+      data: product,
+    });
+
+  } catch (error) {
+    console.error("restoreProduct error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to restore product",
       error: error.message,
     });
   }
